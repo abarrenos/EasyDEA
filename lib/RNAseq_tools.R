@@ -1199,7 +1199,7 @@ build.offline.annotation <- function(
         system(paste("mv", sqlite, DBFile))
         makeEnsembldbPackage(DBFile, version=ens.version, 
     		             maintainer=maintainer, 
-    		             author=author",
+    		             author=author,
                              destDir=folder, license=license)
                              
     } 
