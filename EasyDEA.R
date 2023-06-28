@@ -42,9 +42,9 @@ getScriptPath <- function()
      
     # this works if we were called with 'source()'
     src.path <- getSrcFilename(function() {}, full.names=T)
-    if (! is.null(src.path) && src.path != '')
+    if (! is.null(src.path) && src.path != ""){
         return(src.path)
-
+	}
     # this works for Rscript, it may match more than one path
     # if Rscript was used with several --file= arguments, in
     # which case we will return *only* the first one
@@ -65,45 +65,46 @@ getScriptPath <- function()
 }
 
 # get my location
-mydir <- dirname(getScriptPath())
+#mydir <- dirname(getScriptPath())
+source(paste("lib", "Rbase_tools.R", sep='/'))
 # inside my location there should be a 'lib' directory with the needed
 # auxiliary scripts: we'll source them all
-sourceDir(paste(mydir, "lib", sep='/'))
+sourceDir(paste("lib", sep='/'), VERBOSE = F)
 
 
-use.package(optparse)
-use.package(ensembldb)		# needs to be first to avoid S4 inconsistencies
-use.package(Rsubread)		# for read mapping
-use.package(AnnotationHub)		# to seek annotation packages
-use.package(AnnotationForge)	# to build our annotation package
-use.package(GO.db)
-use.package(PFAM.db)
+use.package("optparse")
+use.package("ensembldb")		# needs to be first to avoid S4 inconsistencies
+use.package("Rsubread")		# for read mapping
+use.package("AnnotationHub")		# to seek annotation packages
+use.package("AnnotationForge")	# to build our annotation package
+use.package("GO.db")
+use.package("PFAM.db")
 
 use.package("biomaRt")		# an alternate approach to retrieve annotation
 
-use.package(tibble)			# general tools
-use.package(tidyr)
-use.package(stringr)
-use.package(dplyr)
-use.package(readr)
-use.package(keypress)
+use.package("tibble")			# general tools
+use.package("tidyr")
+use.package("stringr")
+use.package("dplyr")
+use.package("readr")
+use.package("keypress")
 
-use.package(edgeR)			# RNAseq with edgeR
-use.package(limma)
-use.package(RColorBrewer)
-use.package(gplots)
+use.package("edgeR")			# RNAseq with edgeR
+use.package("limma")
+use.package("RColorBrewer")
+use.package("gplots")
 
-use.package(DESeq2)			# RNAseq with DESeq2
-use.package(IHW)			# for p-value adjustment with IHW
-use.package(ggplot2)
+use.package("DESeq2")			# RNAseq with DESeq2
+use.package("IHW")			# for p-value adjustment with IHW
+use.package("ggplot2")
 
-use.package(cluster) 
-use.package(factoextra)
-use.package(fpc)
+use.package("cluster") 
+use.package("factoextra")
+use.package("fpc")
 use.package("NbClust")
 
-use.package(tcltk)
-use.package(gWidgets2)
+use.package("tcltk")
+use.package("gWidgets2")
 
 
 options <- get.options()
@@ -118,15 +119,17 @@ BOTH <-					  options$BOTH
 USE.ONLINE.ANNOTATION <-  options$USE.ONLINE.ANNOTATION
 USE.EDGER <-              options$USE.EDGER
 USE.DESEQ2 <-             options$USE.DESEQ2
-reference <-              options$reference		# reference genom sequence base name
+reference <-              options$reference		# reference genome sequence
+annotation <-             options$annotation	# reference annotation file
 release <-                options$release		# release name
 target.organism <-        options$target.organism
 ens.version <-            options$ens.version	# version of ENSEMBL to use
 mart.name <-              options$mart.name      # mart from BiomaRt to use
 org.package <-            options$org.package
 n.genes <-                options$n.genes		# number of top genes to revise
-fastq.data <-             options$fastq.data     # directory with fastq files
+fastq.dir <-              options$fastq.dir     # directory with fastq files
 alignment.dir <-          options$alignment.dir
+feature.count.dir <-	  options$feature.count.dir
 rnaseq.out <-             options$rnaseq.out
 my.name <-                options$my.name		# used to identify maintainer of
 my.email <-               options$my.email		# any created annotation package
@@ -151,7 +154,7 @@ by.columns=2
 ##############################################################################
 
 
-short.title('RNAseq')		# Print a visible title
+short.title('EasyDEA: RNA-Seq Analysis')		# Print a visible title
 
 folder <- create.output.hierarchy(rnaseq.out, use.both.reads=BOTH)
 
@@ -165,7 +168,7 @@ system(paste("cp", metadata, folder))
 #system(paste("cp -R", mydir, folder))
 
 # save the options so we keep a record of how the analysis was generated
-save_options(options, paste(folder, 'RNASEQ_OPTIONS.R', sep='/'))
+save.options(options, paste(folder, 'RNAseq_options.conf', sep='/'))
 
 # keep a log file for tracking and reporting
 logfile <- paste(folder, "log", "RNAseq.log", sep='/')
@@ -207,7 +210,7 @@ on.exit(sink.titanic, add=T)
 # 'generate-EnsDBs.R' we create a sqlite file that has all the information
 # needed to continue
 
-short.title('annotation (ensembl)')
+short.title('Ensembl Annotation')
 
 # NOTE: to be used to store/search annotation from now on
 annotation.dir <- file.path(folder, "annotation")
@@ -217,23 +220,21 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
     ah <- AnnotationHub()
     # get ENSEMBL annotations for our target
     qr <- query(ah, c("EnsDb", target.organism))
-    if (length(qr > 0) {
+    if (length(qr) > 0) {
         # there is at least one, choose the most recent (last) one
         #	NOTE: this might not be desired sometimes
-        last.ref <- names(qr)[length(names(qr))]
-        net.edb <- qr[[last.ref]]
+        last.ref <- last(names(qr))
+        ens.db <- qr[[last.ref]]
     }
 
-    # with this we do not need to build it from GTF/GFF/mysql,
-    ens.db <- net.db
 
 } else {    
     DBFile <- build.offline.annotation( 
                               annotation.dir,
-                              db.dir='EnsDb.Ggallus.v106',
+                              db.dir=paste('EnsDb', release, ens.version, sep = "_"),		##ADRIAN
                               target.organism=target.organism,
-                              reference.gtf=reference.gtf,
-                              relese=release,
+                              reference.gtf=reference.gtf,	##ADRIAN
+                              release=release,
                               ens.version=ens.version,
                               user=my.user,
                               pass=my.password,
@@ -247,7 +248,6 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
 if (VERBOSE) {
     # check it
     print(ens.db)
-    print(head(keys(ens.db, 'GENEID')))
     columns(ens.db)
 }
 
@@ -260,7 +260,7 @@ if (VERBOSE) {
 # M A K E     O R G     P A C K A G E
 # ---------------------------------------------------------------
 
-short.title('annotation (Org.db)')
+short.title('Org DB Annotation')
 
 org.db <- NULL
 
@@ -268,13 +268,28 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
     # use AnnotationHub to seek a suitable package
     #ah <- AnnotationHub()	# we have already open the connection
     # check if an Org.db is available for our organism)
-    qo <- query(ah, "Orgdb")
-    if ( last.ref %in% names(qo) ) {
-        org.db <- query(ah, "Orgdb")[[ last.ref ]]
-    } 
+    qo <- query(ah, c("Orgdb", org.package))
+    last.ref <- last(names(qo))
+    org.db <- qo[[last.ref]]
+    
+	#if ( last.ref %in% names(qo) ) {
+    #    org.db <- query(ah, "Orgdb")[[ last.ref ]]
+    #} 
+	
+	# If AnnotationHub does not work, try to retrieve NCBI annotation
+	# directly from org.package if it exists.
+
+	if ( ! exists('org.db')) {			
+		if ( ! require(org.package, character.only = TRUE, quietly = TRUE)) {
+			BiocManager::install(org.package) }
+
+		# Character.only allows to require package form variable name
+		require(org.package, character.only = TRUE)
+		org.db <- get(org.package)
+	}
 }
 
-# if that didn't work, try offline
+# If that didn't work, try offline
 if (is.null(org.db)) {
      # then try to build off-line annotation
      if ( ! require(org.package, character.only=T)) {
@@ -286,7 +301,7 @@ if (is.null(org.db)) {
         # and SwissProt into org.Gg.eg.db.
         # Then the following command had to be used:
         #
-        makeOrgPackageFromNCBI(
+        makeOrgPackageFromNCBI(			## ADRIAN
                 author  = "J. R. Valverde <jrvalverde@cnb.csic.es>", 
                 maintainer = "J. R. Valverde <jrvalverde@cnb.csic.es>", 
                 tax_id  = "9031", # from NCBI Taxonomy browser (ncbi:txid9031)
@@ -296,12 +311,12 @@ if (is.null(org.db)) {
                 #tax_id = "93934", 
                 #genus = "Coturnix", 
                 #species = "japonica", 
-	        #version = "2.0", 
+	        	#version = "2.0", 
                 outputDir = "./org", 
                 NCBIFilesDir = "./ncbi"#, 
                 #rebuildCache=FALSE
                 )
-        # We specify a firectory to save locally the files used (and 
+        # We specify a directory to save locally the files used (and 
         # retrieved from NCBI) to create the Org database.
         # Normally, if the files are older than one day, they will be
         # downloaded again. Since they are very large, the download may
@@ -340,8 +355,7 @@ if (is.null(org.db)) {
     }
 }
 
-
-# at this point ens.db should contain the ENSEMBL data and 
+# At this point ens.db should contain the ENSEMBL data and 
 # org.db the Org type data.
 
 
@@ -350,48 +364,44 @@ if (is.null(org.db)) {
 # ---------------------------------------------------------------
 # O B T A I N   B I O M A R T   A N N O T A T I O N
 # ---------------------------------------------------------------
-short.title('annotation (biomaRt)')
+short.title('BiomaRt Annotation')
 
-if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) ) {
+if ( file.exists(paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/')) ) {
    # we have aready retrieved and saved the annotation, use it
     bm.annot.1 <- read.table(
-    		file=paste(annotation.dir, '/biomaRt.annotation.1st.txt', sep=''), 
-	        sep='\t', 
-                header=T)
+    		file=paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/'), 
+	        sep='\t', header=T)
 } else {
     # get all the annotation
-
-    marts <- listMarts()
-    if (VERBOSE) head(marts)
-    datasets <- listDatasets(useMart("ensembl"))
-    mart.db <- useMart("ensembl", mart.name)
+	
+	## Set up connection to ensembl database
+	marts <- listMarts()
+	if (VERBOSE) head(marts)
+	bm.ensembl <- useMart("ENSEMBL_MART_ENSEMBL")
+	bm.ens.datasets <- listDatasets(bm.ensembl)
+	if (VERBOSE) head(bm.ens.datasets)
+		
+	## Get BiomaRt dataset name using RegExp
+	target.ds <- subset(bm.ens.datasets, grepl(mart.name, dataset))
+	biomart.ds.name <- target.ds$dataset		
+	
+	## Load dataset
+	cat("\nLoading dataset", biomart.ds.name, "\n")
+	if ( ! nrow(target.ds) > 0) { stop("BiomaRt Dataset Not Found!") }
+	mart.db <- useDataset(biomart.ds.name, mart = bm.ensembl)
 
     if (VERBOSE) {
-        head(datasets)
-        ## set up connection to ensembl database
-        ensembl <- useMart("ENSEMBL_MART_ENSEMBL")
-    
-        # list the available datasets (species) for the record
-        listDatasets(ensembl) %>%  filter(str_detect(description, release))
-        attributes <- listAttributes(mart.db)
-        head(attributes)
-        filters <- listFilters(mart.db)
-        head(filters)
-
-        # check the available "filters" - things you can filter for
-        listFilters(mart.db) %>% 
-            filter(str_detect(name, "ensembl"))
-
-        # check the available "attributes" - things you can retreive
-        attr <- listAttributes(mart.db)[,1:2]	# the first 200 are general
-        listAttributes(mart.db)[,1:2] %>% 
-            head(20)
+        #listDatasets(ensembl) %>%  filter(str_detect(description, release))
+        cat("\n   > BiomaRt Attributes")
+		listAttributes(mart.db)[,1:2] %>% head(20)
+        cat("\n   > BiomaRt Filters")
+        listFilters(mart.db) %>% head(20)
     }
     
     # we cannot get all the annotation at once because it times out
     #full.annot <- getBM(attributes=
     #                       c("ensembl_gene_id", "ensembl_transcript_id", 
-    #			   "start_position", "end_position", 
+    #			   				"start_position", "end_position", 
     #                          "chromosome_name", "gene_biotype", 
     #                          "description", 
     #                          "entrezgene_id", "entrezgene_accession", "entrezgene_description", 
@@ -410,7 +420,7 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
 
     bm.entrez.annot <- get.biomart.entrez.annotation(mart.db, annotation.dir)
 
-    bm.go.annot <- get biomart.go.annotation(mart.db, annotation.dir)
+    bm.go.annot <- get.biomart.go.annotation(mart.db, annotation.dir)
 
     bm.goslim.annot <- get.biomart.goslim.annotation(mart.db, annotation.dir)
 
@@ -418,9 +428,9 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
 
     bm.prosite.annot <- get.biomart.prosite.annotation(mart.db, annotation.dir)
 
-    bm.sfam.annot <- get.biomart.superfamily.annotation(mart.db, folder)
+    bm.sfam.annot <- get.biomart.superfamily.annotation(mart.db, annotation.dir)
 
-    bm.extra.annot <- get.biomart.extra.annotation(mart.db, folder)
+    bm.extra.annot <- get.biomart.extra.annotation(mart.db, annotation.dir)
 
     # Now that we have all the pieces, merge them all together
     # into a single annotation variable
@@ -485,9 +495,8 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
     bm.annot.1 <- merge(bm.annot.1, bm.goslim.annot.1, by="ensembl_gene_id")
     bm.annot.1 <- merge(bm.annot.1, bm.extra.annot.1,  by="ensembl_gene_id")
 
-    write.table(bm.annot.1, 
-                file=paste(annotation.dir, '/biomaRt.annotation.1st.txt', sep=''), 
-	        sep='\t', row.names=T, col.names=T)
+    write.table(bm.annot.1, file = paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/'), 
+				sep='\t', row.names=T, col.names=T)
     # we save it to avoid repeating this in the future
 
     # or even do it all at once? if we had enough power for building bm.annot:
@@ -510,52 +519,68 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
 #
 #################################################################################
 
-short.title("aligning")
+fc <- NULL
+if ( ALIGN == TRUE ) {
 
-if ( ALIGN == TRUE) {
-    out <- alignment.dir
-    align.fastq(path=path, reference=reference, aln.out=out, save.dir=folder) 
+	short.title("Aligning Reads")
+	dir.create(alignment.dir, showWarnings = FALSE)
+    bam.files <- align.fastq(fastq.dir = fastq.dir,
+							reference = reference,
+							alignment.dir = alignment.dir) 
+	# bam.files <- list.files(path = alignment.dir, pattern = '.bam$', full.names = TRUE, ignore.case = TRUE)
+
+	short.title("Computing Feature Counts")
+
+    # Compute and save fc in cache
+    dir.create(feature.count.dir, showWarnings = FALSE)
+	fc <- compute.feature.counts(bam.files = bam.files, 
+                           annotation = annotation, 
+                           requireBothEnds = BOTH, 
+                           feature.count.dir = feature.count.dir) 
+
 } else {
-    out <- alignment.dir
-    #out <- 'Alignments_Coturnix'
+
+	#### If Rsubread is used:
+	# One single file will be generated with the counts for all samples
+	cat("\nUsing existing feature count files\n")
+	fc <- read.delim(paste(feature.count.dir, "featureCounts.tab", sep = "/"),
+					header = TRUE, row.names = 1, sep = "\t")
+
+	if (is.null(fc)){
+	
+		#### If HTSeq or similar tools are used:
+		# One count file will be generated per sample. We read the files into a list
+		# and convert it into a single data frame.
+
+		count.files <- list.files(feature.count.dir, pattern = '.*(counts|cnt)$',
+									full.name = TRUE)
+		fc <- merge.count.files(count.files)
+		if (! file.exists(paste(feature.count.dir, 'merged_counts.tab', sep='/')))
+			write.table(fc, paste(feature.count.dir, 'merged_counts.tab', sep='/'))
+	}
+
 }
 
-bam.files <- list.files(path = out, pattern = '.BAM$', full.names = TRUE)
-
-# get the feature counts
-#	we use EnsEMBL annotation from release 6a
-#	this will tae the position counts and match them against the 
-#	genes annotated in the GFF3 file for the reference, obtaining
-#	a list of genes and the number of reads that mapped to them
-#	as an indicator of their expression level
-
-short.title("features")
-
-cat('\nCOMPUTING FEATURE COUNTS\n')
-
-if (file.exists(paste(folder, '/featureCounts.rds', sep=''))) {
-    fc <- readRDS(file=paste(folder, '/featureCounts.rds', sep=''))
-} else {
-    # compute and save fc in cache
-    fc <- compute.feature.counts(files=bam.files, 
-                           reference=reference, 
-                           requireBothEnds=requireBothEnds, 
-                           save.dir=folder) 
-}
-
-#################################################################
-#
-#################################################################
-                                                                #
-#################################################################
-#
-#################################################################
-                                                                #
-#################################################################
+#########################################################################################
 
 # We are ready; we have
 #	annotation (ensembldb, org.db, biomar)
 #	feature counts table
+
+########################################################################################
+
+# PREFILTERING STEP
+# Discard genes with no counts in any of the samples
+
+counts <- fc[rowSums(fc)>1, ]
+head(counts)
+#dim(counts)
+
+## LOAD SAMPLE METADATA AND DEFINE DESIGN COLUMN
+
+sampleInfo <- read.table(metadata, header = TRUE)
+target <- as.factor(sampleInfo[, design.column])
+sampleInfo[, design.column] <- target
 
 if (USE.EDGER) {
 
@@ -563,13 +588,15 @@ if (USE.EDGER) {
     # A N A L Y S I S     W I T H     E D G E R
     # ---------------------------------------------------------------
 
-    short.title('edgeR')
+    short.title('EdgeR Analysis')
 
-    dge <- eR.differential.gene,expression(fc, 
-    			metadata=metadata,
-                threshold=cpm.threshold, 
-                ens.db=ens.db, 
-                folder=folder)
+    dge <- eR.differential.gene.expression(counts, 
+    			metadata = sampleInfo,
+				design.column = design.column,
+                cpm.threshold = cpm.threshold,
+				n.genes = n.genes, 
+                ens.db = ens.db, 
+                folder = folder)
     
     fit <- eR.dge.voom.variation.analysis(dge, design.column, folder)
 

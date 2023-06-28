@@ -65,19 +65,17 @@ create.output.hierarchy <- function(rnaseq.out='.', use.both.reads=TRUE)
 #'
 #' Align all fastq files inside a folder against a reference genome
 #' 
-#' @param path	the path to the folder where the fastq files are stored
+#' @param	fastq.dir	the path to the folder where the fastq files are stored
 #'
-#' @param	reference	the name of the reference genome (without extension)
+#' @param	reference	the organism reference genome
 #'
-#' @param 	aln.out	the path to a directory where we want to store the alignments
-#'
-#' @param	save.dir	the path to a directory where we will store summaries
+#' @param 	alignment.out	the path to a directory where we want to store the alignments
 #' 
 #' @return	nothing
 #'
-#' @usage	align.fastq(path, reference, aln.out, save.dir=aln.out)
+#' @usage	align.fastq(path, reference, aln.out)
 #' 
-#' @examples	align.fastq('./fastq', 'Hsapiens', 'alignments')
+#' @examples	align.fastq('./fastq', 'ref/Hsapiens.fna', 'alignments')
 #'
 #' @author	(C) CNB-CSIC
 #'
@@ -85,72 +83,93 @@ create.output.hierarchy <- function(rnaseq.out='.', use.both.reads=TRUE)
 #'
 #' @noexport
 #
-align.fastq <- function(path, reference, aln.out, save.dir=aln.out) {
-    fastq.data <- path
-    
-    # get the fastq file names
-    R1.fastq.files <- list.files(path=fastq.data, pattern='R1', full.names=TRUE)
-    R2.fastq.files <- list.files(path=fastq.data, pattern='R2', full.names=TRUE)
+
+# Align fastQ reads into the reference genome
+align.fastq <- function(fastq.dir, reference, alignment.dir) {
+   
+	# Get the fastq file names
+    R1.fastq.files <- list.files(path=fastq.dir, pattern='R1', full.names=TRUE)
+    R2.fastq.files <- list.files(path=fastq.dir, pattern='R2', full.names=TRUE)
     print(R1.fastq.files)
     print(R2.fastq.files)
     
-    dbname <- reference
-
-    # we expect a fasta reference file inside a directory named 'ref' in
-    # the alignment output directory, named 'reference'.{fna|fa|fas|fasta}
-    curWD <- getwd()	# save current location
-    setwd(aln.out)	# go to where we want to have the alignments
-    reference.fasta <- paste("./ref/", reference, ".fna", sep='')
-    if (! file.exists(reference.fasta))
-        reference.fasta <- paste("./ref/", reference, ".fa", sep='')
-    if (! file.exists(reference.fasta))
-        reference.fasta <- paste("./ref/", reference, ".fas", sep='')
-    if (! file.exists(reference.fasta))
-        reference.fasta <- paste("./ref/", reference, ".fasta", sep='')
-    # if all else failed we stop here
-    if (! file.exists(reference.fasta))
-        cat.err("No suitable reference fasta file found in\n",
-                "	", getwd(), "/ref/",
-                "(I tried with ", reference, ".fna .fa .fas .fasta)\n", 
-                sep='')
-        
     # we'll check if the output files exist to avoid repeating
     # work already done
-    if (! file.exists(paste(reference, '.0.b.tab', sep=''))) {
-        cat.info('\nBUILDING INDEX\n')
-        # build the reference index inside the 'aln.out' directory
-        buildindex(basename=dbname,reference=reference.fasta)
-        dir()
-    }
+	
+	ref.fasta <- reference
+	ref.name <- sub("\\.[[:alnum:]]+$", "", basename(reference))
+
+	# Go to the alignment directory   
+	wd <- getwd()	
+	setwd(alignment.dir)
+	system(paste('ln -sfr', dirname(paste(wd, ref.fasta, sep = "/")), "ref"))
+	
+	# Check wether sorted bam files already exist.
+	if (length(list.files(pattern='.sorted.bam$', ignore.case=T)) > 0){
+		bam.files <- list.files(pattern='.sorted.bam$', ignore.case=T, full.name = F)
+		cat('\nUSING EXISTING SORTED BAM FILES:')
+		cat('\t', bam.files, sep='\n\t')
+		setwd(wd)
+		return(paste(alignment.dir, bam.files, sep="/"))
+		
+	# Check wether unsorted bam files exist.
+	} else if (length(list.files(pattern='.bam$', ignore.case=T)) > 0){	
+		bam.files <- list.files(pattern='.bam$', ignore.case=T, full.name = F)
+		cat('\nUSING EXISTING BAM FILES:\n')
+		cat(paste(bam.files), sep='\n\t')
+		setwd(wd)
+		return(paste(alignment.dir, bam.files, sep="/"))
+	}
+
+	# If Bam files do not exist, perform alignment with Rsubread
+	if (! file.exists(paste('ref/', ref.name, '.00.b.tab', sep=''))) {
+
+		# build the reference index inside the 'alignment.dir' directory
+		cat('\nBUILDING INDEX\n')
+		buildindex(basename = paste("ref", ref.name, sep = "/"),
+					reference = paste(wd, ref.fasta, sep = "/"))
+
+	} else {
+		cat('\nUSING INDEXED REFERENCE\n')
+	}    
+
+	if (! file.exists(paste(basename(R1.fastq.files[1]), '.subread.BAM', sep=''))) {
+
+		# Align the reads
+		# IMPORTANT NOTE: WE NEED TWO FILES LISTING ALL THE FASTQ FILES TO ALIGN
+		#	R1.fastq.files and R2.fastq.files
+
+		cat('\nALIGNING USING R_SUBREAD\n')
+		align(index = paste('ref', ref.name, sep='/'),
+				#nthreads = nthreads,		##ADRIAN
+				readfile1 = paste(wd, R1.fastq.files, sep = "/"),
+				readfile2 = paste(wd, R2.fastq.files, sep = "/"))        
+
+		# Align will generate the output in the fastq directory, we
+		# so we move the alignment results to the output directory
+		system(paste("mv ", paste(wd, fastq.dir, sep = "/"), "/*.BAM .", sep=""), ignore.stderr = T)
+		system(paste("mv ", paste(wd, fastq.dir, sep = "/"), "/*.vcf .", sep=""), ignore.stderr = T)
+		system(paste("mv ", paste(wd, fastq.dir, sep = "/"), "/*.summary .", sep=""), ignore.stderr = T)
+	}
+
+	bam.files <- list.files(pattern='.subread.bam$', ignore.case=T)
+
     
-    r11 <- basename(R1.fastq.files[1])
-    if (! file.exists(paste(aln.out, '/', r11, '.subread.BAM', sep=''))) {
-        cat.info('\nALIGNING\n')
-        # align the reads
-        # IMPORTANT NOTE: WE NEED TWO FILES LISTING ALL THE FASTQ FILES TO ALIGN
-        #	R1.fastq.files and R2.fastq.files
-        align(index=dbname, readfile1=R1.fastq.files, readfile2=R2.fastq.files)
+	# Alignment Statistics:
+	# Get the bam file names and inspect them to count the number
+	# of reads that map to each genome position
+    
+	if ( ! file.exists('bam_files_stats.txt') & ! length(list.files(pattern = '.idxstats$')) == length(bam.files)) {
         
-        # align will generate the output in the data directory, we
-        # do not want to mix datasets, so we move the alignment results
-        # to the corresponding output directory
-        system(paste("mv ", fastq.data, "/*.BAM .", sep=""))
-        system(paste("mv ", fastq.data, "/*.vcf .", sep=""))
-        system(paste("mv ", fastq.data, "/*.summary .", sep=""))
-    }
-    setwd(curWD)	# go back to where we were
-    
-    # get the bam file names and inspect them to count the number
-    # of reads that map to each genome position
-    if ( ! file.exists(paste(save,dir, 'bam_files_stats.txt', sep='/'))) {
-        bam.files <- list.files(path=aln.out, pattern='.BAM$', full.names = TRUE)
-        print(bam.files)
+		cat('\nGENERATING BAM FILES STATISTICS')
         props <- propmapped(files=bam.files)
-        print(props)
-        write.table(props, file=paste(save,dir, 'bam_files_stats.txt', sep='/'), 
+        props
+        write.table(props, file='bam_files_stats.txt', 
     	    row.names=T, col.names=T, sep='\t')
     }
-
+	cat('READ ALIGNMENT - DONE')
+	setwd(wd)
+	return(paste(alignment.dir, bam.files, sep="/"))
 }
 
 
@@ -187,26 +206,41 @@ align.fastq <- function(path, reference, aln.out, save.dir=aln.out) {
 #'
 #' @noexport
 #
-compute.feature.counts <- function(bam.files, reference, requireBothEnds=T, save.dir='.') {
+compute.feature.counts <- function(bam.files, annotation, feature.count.dir, requireBothEnds = T) {
 
-    reference.ann   <- paste("./ref/", reference, ".gtf", sep='')
-    is.gtf <- TRUE
-    if (! file.exists(reference.ann) ) {
-        reference.ann   <- paste("./ref/", reference, ".gff", sep='')
-        is.gtf=FALSE
-    }
-    if (! file.exists(reference.ann) ) {
-        cat.err("No annotation file ./ref/.", reference, ".gtf or .gff found\n",
-                sep='')
-    }
-    fc <- featureCounts(bam.files=bam.files, 
-	    annot.ext=reference.ann, 
-            isGTFAnnotationFile=is.gtf,
-	    isPairedEnd=T, 
-            requireBothEndsMapped=requireBothEnds, 
-            primaryOnly=T, 
-            ignoreDup=T, 
-            useMetaFeatures=T)
+    ref.name  <- sub("\\.[[:alnum:]]+$", "", basename(annotation))
+    ref.gtf   <- sub("\\.[[:alnum:]]+$", ".gtf", annotation)
+    ref.gff   <- sub("\\.[[:alnum:]]+$", ".gff", annotation)
+	
+	# If feature count data already exists, load it
+    if (file.exists(paste(feature.count.dir, "featureCounts.tab", sep = "/"))){
+		
+		fc <- read.delim(paste(feature.count.dir, "featureCounts.tab", sep = "/"), header = TRUE, row.names = 1, sep = "\t")
+		cat(paste('\nUSING ALREADY EXISTING FEATURE COUNT FILE: ', feature.count.dir, "/featureCounts.tab\n", sep=""))
+		return(fc)
+	}
+		
+	# First, try to annotate counts using GTF file. If it is not found,
+	# try with GFF. If neither of the annotation files exist, abort.
+    if (! file.exists(ref.gtf) && ! file.exists(ref.gff)) {
+        cat.err("Annotation files", ref.gtf, ".GTF or .GFF not found\n")    
+	} else if (file.exists(ref.gtf)) {
+		annot.ext <- ref.gtf
+		isGTF <- TRUE
+	} else {
+		annot.ext <- ref.gff
+		isGTF <- FALSE
+	}
+	
+    fc <- featureCounts(files = bam.files, 
+	    				annot.ext = annot.ext, 
+        				isGTFAnnotationFile = isGTF,
+	    				isPairedEnd = T, 
+        				requireBothEndsMapped = requireBothEnds, 
+        				primaryOnly = T, 
+        				ignoreDup = T, 
+        				useMetaFeatures = T)#, nthreads = nthreads) ##ADRIAN
+
     #  this means: process all BAM files
     #	Use as annotation the external file reference.gtf which is GTF
     #	BAM files contain paired end reads and we will only consider those
@@ -220,28 +254,85 @@ compute.feature.counts <- function(bam.files, reference, requireBothEnds=T, save
     #	We match against any feature in the GTF file, not only genes
     #	(this implies we will need to check the annotation carefully later)
     #	We do not remove chimeric fragments, but do actually count them too
+	
+	# Remove the xtension .bam from the feature count table header
+	colnames(fc$counts) <- sub('\\..*$', '', colnames(fc$counts))
+	fc$targets <- sub('\\..*$', '',fc$targets)
+	
+	# SAVE FEATURE COUNTS
+	# -------------------
+	# now the variable fc contains 4 columns: annotation, target, counts and stats
+	# but they exist only in the RAM memory, they are not stored somewhere safe,
+	# so, we save them and create new variables so as to make it easier for us to 
+	# manipulate the data
+	write.table(fc$counts, file=paste(feature.count.dir, 'featureCounts.tab', sep='/'),
+				sep = "\t", row.names = TRUE, col.names = TRUE)
+	write.csv(fc$counts, file=paste(feature.count.dir, 'featureCounts.csv', sep='/'))
+	write.table(fc$stats, file=paste(feature.count.dir, 'featureCounts_stat.txt', sep='/'),
+				sep = "\t", row.names = TRUE, col.names = TRUE)
 
-    # SAVE FEATURE COUNTS
-    # -------------------
-    # now the variable fc contains 4 columns: annotation, target, counts and stats
-    # but they exist only in the RAM memory, they are not stored somewhere safe,
-    # so, we save them and create new variables so as to make it easier for us to 
-    # manipulate the data
-    write.csv(fc$counts, file=paste(save.dir, 'featureCounts.csv', sep='/'),
-	      row.names=T, col.names=T, quote=F)
-    write_delim(fc$stat, file=paste(save.dir, 'featureCounts_stat.txt', sep='/'), 
-	        delim='      ')
-    # save all the contents of 'fc' in an RDS file
-    saveRDS(fc, file=paste(save.dir, '/featureCounts.rds', sep=''))
-    #	'fc' can later be recovered with: fc <- readRDS(file='featureCounts.rds'
-    # and save as well as Rdata file
-    save(fc, file=paste(save.dir, '/featureCounts.RData', sep=''))
-    #	'fc' can later be recovered with: fc <- load(file='featureCounts.RData')
+	# save all the contents of 'fc' in an RDS file and in an Rdata file
 
-    return(fc)
+	saveRDS(fc, file=paste(feature.count.dir, '/featureCounts.rds', sep=''))
+	save(fc, file=paste(feature.count.dir, '/featureCounts.RData', sep=''))
+
+	# 'fc' can later be recovered with:
+	# 		fc <- readRDS(file='featureCounts.rds')  
+	# 		fc <- load(file='featureCounts.RData')
+		
+	cat('\nFEATURE COUNT FINISHED\n')
+	
+	return(fc)
 }
 
 
+#' merge.count.files
+#'
+#' Takes an array of files containing individual count data and merge then by
+#' the gene_id(leftmost column). Input files should be in tabular format and
+#' each of them should correspond to a different sample. The merged output
+#' table is saved in the same directory where the individual counts are found.
+#' 
+#' @param	count.files	Vector with the path of the individual feature count files
+#' 
+#' @return	table with merged count files
+#'
+#' @usage	merge.count.files(count.files)
+#' 
+#' @examples	merge.count.files(c("sample1.cnt", "sample2.cnt", "sample3.cnt"))
+#'
+#' @author	(C) CNB-CSIC
+#'
+#' @license	EU-GPL
+#'
+#' @noexport
+#
+merge.count.files <- function(count.files) {
+
+	if (length(count.files) <= 0) cat.err("Feature Count Files not found.\n", abort = TRUE)    
+	
+	labels <- sub('\\..*$', '', basename(count.files))
+	
+	cat('\nMerging count files:\n\n')
+	cat(count.files, sep='\n')
+
+	# Each file is saved as an element of the list. Each element is a table with two coulmns:
+	#	Gene_ID and "Sample name" (counts).
+
+	count.list <- list()
+	for (i in 1:length(labels)) {
+		label <- labels[i]
+		filename <- count.files[i]
+		count.list[[label]] <- read.table(filename, row.names = 'V1', header = F, stringsAsFactors = F)  #row.names='V1'
+		colnames(count.list[[label]]) <- label
+	}
+
+	# Bind all htseq count files into a unique data frame by GeneID.
+	all.counts <- bind_cols(count.list)
+	
+	# Save the merged dataframe into a file
+	return(all.counts)
+}
 
 #' h.cluster.changes
 #'
@@ -1065,481 +1156,6 @@ cluster.changes <- function(data.table, annotated.data,
 
 
 
-
-
-#' build.offline.annotation
-#'
-#' Try different strategies to buid the refernece genome annotation 
-#' database online.
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-build.offline.annotation <- function(
-                                     folder,
-                                     db.dir='EnsDb.Ggallus.v106',
-                                     target.organism,
-                                     reference.gtf,
-                                     release,
-                                     ens.version,
-                                     user, 
-                                     pass
-                                     author,
-                                     maintainer,
-                                     license
-                                    ) 
-{
-
-    # We'll try to build an EnsDb Package
-    # so we can keep it locally for future use
-    #EnsDbPackageDir <- paste(folder, 'EnsDb.Ggallus.v106', sep='/')
-    #EnsDbPackageDir <- paste(folder, 'EnsDb.Cjaponica.v105', sep='/')
-    EnsDbPackageDir <- paste(folder, db.dir, sep='/')
-
-    # source script included with package 'ensembldb'
-    scr <- system.file("scripts/generate-EnsDbs.R", package = "ensembldb")
-    source(scr)
-
-    # use our local GTF file if that didn't work
-    if (dir.exists(EnsDbPackageDir) ) {
-        sqlite <- paste(target.organism, ".", release, ".", ens.version, ".sqlite", sep='/')
-        DBFile <- paste(folder, '/', sqlite)
-    } else {
-        # generate SQLite database in place from GTF. Produces e.g.
-        #    ./gallus_gallus.GRCg6a.106.sqlite
-        gtf.edb <- ensDbFromGtf(gtf=reference.gtf, 
-	        organism=target.organism,
-                genomeVersion=release,
-                version=ens.version,
-                destDir=folder)			# lacks entrezid
-        #dir()
-        
-        # file name of the SQLite database created
-        #DBFile <- paste(folder, 'gallus_gallus.GRCg6a.106.sqlite', sep='/')
-        sqlite <- paste(target.organism, ".", release, ".", ens.version, ".sqlite", sep='/')
-        DBFile <- paste(folder, '/', sqlite)
-
-        # we'll select the SQLite database file generated from the GTF to
-        # create an EnsDb R package 
-        system(paste("mv", sqlite, DBFile))
-
-        makeEnsembldbPackage(DBFile, version=ens.version, 
-    		             maintainer=maintainer, 
-    		             author=author,
-                             destDir=folder, license=license)
-    }
-
-    # retry with GFF if that didn't work
-    if ( ! dir.exists(EnsDbPackageDir) ) {
-        # As an alternative, we may use the GFF3 file (which should contain
-        # the same information
-        gff.edb <- ensDbFromGff(gff=reference.gff, 
-                organism=target.organism,
-                genomeVersion=release,
-                version=ens.version,
-                destDir=folder)
-        # but it seems to lack entrezid and transcript_id
-
-        #dir()
-        # file name of the SQLite database created
-        sqlite <- paste(target.organism, ".", release, ".", ens.version, ".sqlite", sep='/')
-        DBFile <- paste(folder, '/', sqlite)
-
-        # we'll select the SQLite database file generated from the GFF to
-        # create an EnsDb R package 
-        system(paste("mv", sqlite, DBFile))
-
-        makeEnsembldbPackage(DBFile, version=ens.version, 
-    		             maintainer=maintainer, 
-    		             author=author,
-                             destDir=folder, license=license)
-    } else {
-        sqlite <- paste(target.organism, ".", release, ".", ens.version, ".sqlite", sep='/')
-        DBFile <- paste(folder, '/', sqlite)
-    }
-
-    # we still have a third option, build it from a MySQL file
-    if ( ! file.exists(EnsDbPackageDir) ) {
-        # This shouln't be needed because we have already done it above
-        # using the GTF/GFF3 file.
-        # This is an alternate way to do generate the EnsDb package from
-        # MySQL data downloaded from ENSEMBL
-        local.mysql.db <- paste("mysql/", 
-        	tolower(target.organism), 
-                "_core_", ens.version, "_", release, sep='')
-        #local.mysql.db <- "mysql/coturnix_japonica_core_104_2"
-        #local.mysql.db <- "mysql/gallus_gallus_core_105_6"
-        createEnsDbForSpecies(ens_version = ens.version,
-                user = user, 
-                pass=pass,
-                host = "localhost", 
-                local_tmp=local.mysql.db, 
-                species=target.organism,
-                dropDb=FALSE)
-        # This should create a .sqlite file like ensDbFromGtf above,
-        # named, e.g.
-        #	Gallus_gallus.GRCg6a.106.sqlite
-        #       ^
-        # with similar contents to the one produced from ensDBFromGtf/Gff;
-        # if none of these does work, then tweak the process by hand in
-        # source("scripts/generate-EnsDBs.R")
-        sqlite <- paste(target.organism, ".", release, ".", ens.version, ".sqlite", sep='/')
-        DBFile <- paste(folder, '/', sqlite)
-        system(paste("mv", sqlite, DBFile))
-        makeEnsembldbPackage(DBFile, version=ens.version, 
-    		             maintainer=maintainer, 
-    		             author=author,
-                             destDir=folder, license=license)
-                             
-    } 
-    return(DBFile)
-}
-
-
-
-#' get.biomart.ensembl.annotation
-#'
-#' obtain ENSEMBL-related annotation using BiomaRt either from a local
-#' cache file previously saved or directly from the network
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.ensembl.annotation <- function(mart.db, folder) {
-
-    if ( ! file.exists( paste(folder, 'biomart.ensembl.tab', sep='/')) ) {
-        bm.ensembl.annot <- getBM(attributes=c(
-                               "ensembl_gene_id", 
-                               "ensembl_transcript_id", 
-                               "start_position", "end_position", 
-                               "chromosome_name", "gene_biotype", 
-                               "description"),
-                            mart=mart.db)
-        write.table(bm.ensembl.annot, paste(folder, '/biomart.ensembl.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.ensembl.annot <- read.table(paste(folder, '/biomart.ensembl.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.ensembl.annot)
-}
-
-
-#' get.biomart.entrez.annotation
-#'
-#' obtain ENTREZ/NCBI-related annotation from BiomaRt, using either local
-#' cached data or directly from the network
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.entrez.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.entrez.tab', sep='')) ) {
-        bm.entrez.annot <- getBM(attributes=c(
-                               "ensembl_gene_id", 
-                                "entrezgene_id", "entrezgene_accession", "entrezgene_description"),
-                            mart=mart.db)
-        write.table(bm.entrez.annot, paste(folder, '/biomart.entrez.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.entrez.annot <- read.table(paste(folder, '/biomart.entrez.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.entrez.annot)
-}
-
-
-
-#' get.biomart.go.annotation
-#'
-#' obtain GO annotation from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.go.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.go.tab', sep='')) ) {
-        bm.go.annot <- getBM(attributes=c(
-                               "ensembl_gene_id", 
-                                "go_id", "name_1006", "definition_1006", "go_linkage_type", "namespace_1003"), 
-                           mart=mart.db)
-        write.table(bm.go.annot, paste(folder, '/biomart.go.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.go.annot <- read.table(paste(folder, '/biomart.go.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.go.annot)
-}
-
-
-
-#' get.biomart.goslim.annotation
-#'
-#' obtain GOslim annotatin from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.goslim.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.goslim.tab', sep='')) ) {
-        bm.goslim.annot <- getBM(attributes=c(
-                               "ensembl_gene_id", 
-                                "goslim_goa_accession", "goslim_goa_description"),
-                           mart=mart.db)
-        write.table(bm.goslim.annot, paste(folder, '/biomart.goslim.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.goslim.annot <- read.table(paste(folder, '/biomart.goslim.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-}
-
-
-#' get.biomart.family.annotation
-#'
-#' obtain protein family (PFAM, TIGRFam, etc...) annotation from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.family.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.fam.tab', sep='')) ) {
-        bm.fam.annot <- getBM(attributes=c(
-                               "ensembl_gene_id",
-                               "pfam",
-                               "pirsf",
-                               "prints",
-                               "tigrfam"
-                               ), 
-                           mart=mart.db)
-        write.table(bm.fam.annot, paste(folder, '/biomart.fam.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.fam.annot <- read.table(paste(folder, '/biomart.fam.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.fam.annot)
-}
-
-
-#' get.biomart.prosite.annotation
-#'
-#' obtain PROSITE annotation from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.prosite.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.prosite.tab', sep='')) ) {
-        bm.prosite.annot <- getBM(attributes=c(
-                               "ensembl_gene_id",
-                               "scanprosite",
-                               "pfscan" 
-                               ), 
-                           mart=mart.db)
-        write.table(bm.prosite.annot, paste(folder, '/biomart.prosite.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.prosite.annot <- read.table(paste(folder, '/biomart.prosite.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.prosite.annot)
-}
-
-
-
-#' get.biomart.superfamily.annotation
-#'
-#' obtain SuperFam annotation from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.superfamily.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.sfam.tab', sep='')) ) {
-        bm.sfam.annot <- getBM(attributes=c(
-                               "ensembl_gene_id",
-                               "superfamily"
-                               ), 
-                           mart=mart.db)
-        write.table(bm.sfam.annot, paste(folder, '/biomart.sfam.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.sfam.annot <- read.table(paste(folder, '/biomart.sfam.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.sfam.annot)
-}
-
-
-#' get.biomart.extra.annotation
-#'
-#' obtain additional miscellaneous annotation from BiomaRt
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-get.biomart.extra.annotation <- function(mart.db, folder) {
-    if ( ! file.exists(paste(folder, '/biomart.extra.tab', sep='')) ) {
-        bm.extra.annot <- getBM(attributes=c(
-                               "ensembl_gene_id", 
-                               "pdb",
-                               #"reactome", 
-                               "uniprotswissprot"), 
-                           mart=mart.db)
-        write.table(bm.extra.annot, paste(folder, '/biomart.extra.tab', sep=''), 
-	        row.names=T, col.names=T, sep='\t')
-    } else {
-        bm.extra.annot <- read.table(paste(folder, '/biomart.extra.tab', sep=''), 
-	        header=T, sep='\t')
-    }
-    return(bm.extra.annot)
-}
-
-
-#' biomart.merge.annotations
-#'
-#' merge together various annotation datasets into a single, consolidated one
-#' 
-#' @param
-#' 
-#' @return
-#'
-#' @usage
-#' 
-#' @examples
-#'
-#' @author	(C) CNB-CSIC
-#'
-#' @license	EU-GPL
-#'
-#' @noexport
-#
-biomart.merge.annotations <- function(ann, by="ensembl_gene_id") {
-    if (! file.exists(paste(folder, '/biomaRt.annotation.txt', sep=''))) {
-        # ann is a list of annotations to merge
-        if (length(ann) == 1) return(ann)		# nothing to merge
-
-        # we have at least two
-        bm.annot <- merge(ann[[1]], ann[[2]], by=by)
-
-        if (length(ann == 2) return(bm.annot)
-
-        # we have more annotations to merge
-        for (i in 3:length(ann))
-            bm.annot <- merge(bm.annot, ann[[i]], by=by)
-        write.table(bm.annot, file=paste(folder, '/biomaRt.annotation.txt', sep=''), 
-                    sep='\t', row.names=T, col.names=T)
-    } else {
-        bm.annot <- read.table(paste(folder, '/biomaRt.annotation.txt', sep=''), 
-	        header=T, sep='\t')}
-    }
-    return(bm.annot)
-}
-
-
-
-
 # # # # edgeR functions
 
 #
@@ -1555,7 +1171,8 @@ eR.save.top <- function(fit, folder, n.genes=500, sort.by='p', coef=1, p.value=0
                        number=n.genes, 
                        sort.by=by, 
                        p.value=p.value)
-        file <- paste(folder, 
+        
+		file <- paste(folder, 
                       '/edgeR/cmp_coef=', coef, 
                       '_top_', n.genes, 
                       '_by', by, 
@@ -1641,7 +1258,7 @@ eR.save.top.ann.thresh <- function(fit, folder, n.genes=500, sort.by='p', coef=1
 
 eR.fit.annotate <- function(fit, ens.db, biomart) {
 
-     if (str_subrownames(fit, 1, 3) == "ENS"))
+     if (str_subrownames(fit, 1, 3) == "ENS")
          by='GENEID'
      else
      	by='ENTREZID'
@@ -1709,20 +1326,31 @@ eR.save.top.fit <- function(fit, file, n.genes=500, sort.by='PValue', p.value=0.
     # if fit is annotated the annotation will also be saved
 }
 
+#' Plot counts-counts per million (cpm) correlation in order to define a count
+#' threshold.
+#'
+counts.cpm.plot <- function(counts, cpm, out.png = NULL) {
+
+	as.png({	plot(x = as.matrix(counts), y = as.matrix(cpm), xlim = c(0,20), ylim = c(0,5),
+						pch = 1, cex = 0.8, xlab = 'Counts', ylab = 'Counts per Million (CPM)')
+				abline(v = 10, col = 2, lwd = 2)
+				abline(v = 15, col = 2, lwd = 2)
+				#abline(h = 0.3, col = 2)
+				arrows(10, 3, 15, 3, angle = 20, code = 3, col = 1, length = 0.2, lwd = 3, lty = 1)
+				text(x=12.5, y=3.2, 'Expression\nthreshold', cex= 1)
+	}, out.png, overwrite = TRUE)
+}
 
 
-eR.differential.gene.expression<- function(fc, 
-                                           metadata='SampleInfo.txt',
-                                           threshold,
+
+eR.differential.gene.expression<- function(counts, 
+                                           metadata,
+										   design.column,
+                                           cpm.threshold,
+										   n.genes,
                                            ens.db,
                                            folder)
 {
-
-    # make convenience names
-    counts <- fc$counts
-    annotation <- fc$annotation
-    stats <- fc$stats
-    target <- read.delim(paste(rnaseq.out, metadata, sep='/'))
 
     # then we proceed to the analysis.. for this, we will need other packages
     #library(edgeR)
@@ -1741,7 +1369,6 @@ eR.differential.gene.expression<- function(fc,
     # convert counts to CPM
     cpm.counts <- cpm(counts)
 
-
     # we'll plot the correlation of cpm and counts to see which is the number of
     # cpm that corresponds to 10-15 counts minimum. we see this information
     # graphically we use for example column 1... we could check every file
@@ -1749,30 +1376,25 @@ eR.differential.gene.expression<- function(fc,
     # should be no need
 
     out.png <- paste(folder, '/edgeR/img/edgeR_CPMcounts.png', sep='')
-    as.png( {
-            plot(counts[,1:12], cpm.counts[,1:12], xlim=c(0,20), ylim=c(0,5))
-            abline(v=10, col=1)
-        }, out.png )
+    counts.cpm.plot(counts = counts, cpm = cpm.counts, out.png = out.png)
 
     # we will set up the threshold to 0.25 according on the plot we have drawn
     # this command will return a table of trues and falses, then, we want to keep
     # only the rows that exceed the threshold at least in three different
     # cases(experiments .bam files)
 
-
-    #thres <- cpm.counts > 0.25		# Coturnix
-    thres <- cpm.counts > threshold		# 0.5 for Gallus
+    cat(paste("\nFiltering genes by CPM threshold", cpm.threshold, "\n"))
+    thres <- cpm.counts > cpm.threshold		# 0.5 for Gallus
     keep <- rowSums(thres) >=3
-    if(VERBOSE) print(table(keep))
+    counts.keep <- counts[keep,]
 
+	if(VERBOSE) print(table(keep))
 
     # then we store in a different variable the genes whose counts exceed the
     # threshold and visualise the content of the new variable to see the amount of
     # remaining genes
-
-    counts.keep <- counts[keep,]
-    dim(counts.keep)
-    if ( VERBOSE ) {
+   	
+	if ( VERBOSE ) {
         # some paranoid manual checks
         # we are using counts instead of cpm
         cpmavg <- data.frame(vd000.0=apply(counts.keep[,13:15],1,mean), 
@@ -1789,72 +1411,75 @@ eR.differential.gene.expression<- function(fc,
                               ) 
         row.names(f.c000.0) <- row.names(cpmavg)
         l.f.c000.0 <- log2(f.c000.0)
-        write.table(f.c000.0, file=paste(out.dir, '/edgeR/hand.fc_000.0.tab', sep=''), sep='\t')
-        write.table(l.f.c000.0, file=paste(out.dir, '/edgeR/hand.lfc_000.0.tab', sep=''), sep='\t')
-        write.table(cpmavg, file=paste(out.dir, '/edgeR/hand.cpmavg.tab', sep=''), sep='\t')
+        write.table(f.c000.0, file=paste(folder, '/edgeR/hand.fc_000.0.tab', sep=''), sep='\t')
+        write.table(l.f.c000.0, file=paste(folder, '/edgeR/hand.lfc_000.0.tab', sep=''), sep='\t')
+        write.table(cpmavg, file=paste(folder, '/edgeR/hand.cpmavg.tab', sep=''), sep='\t')
     }
 
     # We have manipulated the data discarding whatever is not of high interest
     # and now we need to see the differencial expression and highlight the
     # differences among the cells
 
-    # convert the counts.keep to a DGEList
+    # Convert the counts.keep to a DGEList
     dge <- DGEList(counts.keep)
-
-
-    # do TMM normalization
+	dge$samples$group <- as.factor(metadata[ ,design.column])
+    
+	# do TMM normalization
+    cat("\nCalculating TMM normalization factors\n")
     dge <- calcNormFactors(dge)
     if (VERBOSE) print(dge$samples)
 
     # Plot the library size of the different samples.
-    out.png <- paste(out.dir, '/edgeR/img/edgeR_sample_lib_size.png', sep='')
-    as.png(barplot(dge$samples$lib.size, cex.names= 1, main = "Library Size", col = dge$samples$group, names.arg=dge$samples$group, ylab = "Reads"), out.png, overwrite=TRUE)
+    out.png <- paste(folder, '/edgeR/img/edgeR_sample_lib_size.png', sep='')
+    as.png(barplot(dge$samples$lib.size, cex.names= 0.8,
+					main = "Library Size",
+					col = dge$samples$group,
+					names.arg=dge$samples$group,
+					ylab = "Reads"), out.png, overwrite=TRUE)
 
 
     # Now, do some quality control plots, barplots and boxplots
     # we need normalized data counts so we take the logarithm
     # we need to group together all the experiment data that correspond to the
-    # same  cell type (target) and asign a different color to each one so as to
-    # distinguish them graphically; we know we have 4 groups so we have to specify
-    # 4 different colors
-    out.png <- paste(folder, '/edgeR/img/edgeR_sample_lib_size.png', sep='')
-    as.png(barplot(dge$sample$lib.size), out.png)
-
-    logcpm <- cpm(dge$counts, log=TRUE)
-    group.col <- c('red', 'blue', 'green', 'yellow')[target$[ ,design.column]] 
+    # same  sample (target) and asign a different color to each one so as to
+    # distinguish them graphically.
+	
+    # We first set up the colours we will use for the different plots 
+    # and then we create all the colors in between in the palette
+    mypalette <- brewer.pal(11, 'RdYlBu')
+    morecolors <- colorRampPalette(mypalette)
+	
+	logcpm <- cpm(dge$counts, log=TRUE)
+	colors <- morecolors(length(levels(dge$samples$group)))
+    group.col <- colors[dge$samples$group] 
 
     out.png <- paste(folder, '/edgeR/img/edgeR_log2_cpm.png', sep='')
     as.png( {
             par(mfrow=c(1,1))
             boxplot(logcpm, xlab='', ylab=' Log2 counts per million', 
-	            col= group.col, las=2, outline=FALSE)
+	        col= group.col, las=2, outline=FALSE)
             abline(h=median(logcpm), col='red')
-            title('Boxplots of logCPMs unnormalised')
+            graphics::title('Boxplots of logCPMs unnormalised')
         }, out.png )
 
-    # then we produce an MDS plot to see any significant difference between the
+    # Now we produce an MDS plot to see any significant difference between the
     # groups
     out.png <- paste(folder, '/edgeR/img/edgeR_mds_plot.png', sep='')
     as.png( {
             par(mfrow= c(1,1))
-            plotMDS(dge, col=group.col)
+            plotMDS(dge, col = group.col)
         }, out.png)
 
 
-    # now is time to see the differences in the expression (variance). We have
-    # to apply a funcion that calculates the variance by rows (genes) and then
+    # Next, we will identify the to differentially expressed genes (higher variance).
+    # We apply a funcion that calculates the variance by rows (genes) and then
     # retrieve the n.genes most DE genes
 
-    logcounts <- cpm(dge, log =TRUE)
-    var_genes <- apply(logcounts, by.rows, var)
+    cat(paste("\nCalculating top", n.genes, "genes with the highest variance\n"))   
+	var_genes <- apply(logcpm, by.rows, var)
     select_var <- names(sort(var_genes, decreasing=TRUE))[1:n.genes]
-    highly_var <- logcounts[select_var,]
-    dim(highly_var)
-
-    # we now set up the colours we will use for the heatmap plot 
-    # and then we create all the colors in between in the palette
-    mypalette <- brewer.pal(11, 'RdYlBu')
-    morecolors <- colorRampPalette(mypalette)
+    highly_var <- logcpm[select_var,]
+    #dim(highly_var)
 
     # we plot the heatmap.2 (gplots) without a line (trace), scale by row
     # (difference in color) margins (something about the labels used), also we
@@ -1867,40 +1492,39 @@ eR.differential.gene.expression<- function(fc,
             heatmap.2(highly_var, 
                       col= rev(morecolors(50)), 
                       trace='none', 
-                      ColSideColors=group.col,
+                      ColSideColors = group.col,
                       scale='row', 
                       margins= c(15,5))
             #par(mar=margins)
         }, out.png)
 
     # This plot is of limited use. We'd better have other names for rows and 
-    # columns and plot the n first (most variable) to see them well
-    n <- 50
-    high_var <- highly_var
-    colnames(high_var) <- gsub("_R1*.[Bb][Aa][Mm]", "", colnames(highly_var))
+    # columns and plot the top 50 (most variable) to see them well
+	n <- 50
+	high_var <- highly_var
+	colnames(high_var) <- gsub("_R1.[Bb][Aa][Mm]", "", colnames(highly_var))
     
-    ## NOTE: we should add the annotation here, before doing the next plot
-     if (str_subrownames(fit, 1, 3) == "ENS"))
-         by='GENEID'
-     else
-     	by='ENTREZID'
-    name <- ensembldb::select(ens.db, keys=rownames(high_var), 
-                       column=by, keytype=by, 
-                       columns=c('GENENAME'))
-    out.png <- paste(folder, '/edgeR/img/edgeR_heatmap.', n,'.png', sep='')
-    as.png( {
-            #margins <- par("mar")
-            #par(mar=c(25, 5, 5, 10))
-            heatmap.2(high_var[1:n,1:15], 
-                          col=rev(morecolors(50)), 
-                          trace='none', 
-                          ColSideColors=group.col,
-                          scale='row', 
-                          margins= c(15,5),
-                          labRow=name[1:n, 2])
-            #par(mar=margins)
-        }, out.png )
-
+	## NOTE: we should add the annotation here, before doing the next plot
+    if (all(str_sub(rownames(high_var), 1, 3) == "ENS")){
+        by='GENEID'
+    }else{
+    	by='GENENAME'}
+	genenames <- ensembldb::select(ens.db, keys = rownames(high_var), 
+                	    keytype = by, 
+                	    columns=c('GENENAME', 'GENEID'))
+	out.png <- paste(folder, '/edgeR/img/edgeR_heatmap.', n,'.png', sep='')
+	as.png( {
+        	#margins <- par("mar")
+        	#par(mar=c(25, 5, 5, 10))
+        	heatmap.2(high_var[1:n,], 
+                    	  col=rev(morecolors(n)), 
+                    	  trace='none', 
+                    	  ColSideColors = group.col,
+                    	  scale='row', 
+                    	  margins= c(15,5),
+                    	  labRow=genenames[1:n, 1])
+        	#par(mar=margins)
+			}, out.png )
 
     # We can automate the estimation of the dispersion and add it to the dge object
     dge <- estimateCommonDisp(dge)
@@ -2190,7 +1814,7 @@ eR.fit.annotate.ensembl.biomart.save <- function(fit,
     # file
 
     # we'll use ens.db
-    if (str_sub(rownames(fit, 1,3) == 'ENS')
+    if (str_sub(rownames(fit, 1,3) == 'ENS'))
         by <- 'GENEID'
     else
         by <- 'ENTREZID'

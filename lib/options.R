@@ -2,32 +2,34 @@ get.options <- function()
 {
     # set original default values
     # we could set them as argument 'default' in make_option()
-    ALIGN <- FALSE
-    BOTH <- TRUE
-    USE.ONLINE.ANNOTATION <- TRUE
-    USE.EDGER <- TRUE
-    USE.DESEQ2 <- TRUE
-    reference <- "GRCg6a"
-    release <- "GRCg6a"
-    target.organism <- 'Gallus_gallus'
-    ens.version <- '106'
-    mart.name <- 'ggallus_gene_ensembl'
-    org.package <- "org.Ggallus.eg.db"
-    n.genes <- 1000
-    fastq.data <- 'fastq-qc-paired'
-    alignment.dir <- 'aln-Rsubread'
-    rnaseq.out <- 'rnaseq'
-    my.name <- 'J. R. Valverde'
-    my.email <- '<jrvalverde@cnb.csic.es>'
-    my.user <- 'sci'
-    my.password <- "password"
-    metadata <- 'SampleInfo.txt'
-    cpm.threshold <- 0.5
-    significance.threshold <- 1
-    design.column <- "Src"
-    config.file <- NULL
-    INTERACTIVE <- FALSE
-    VERBOSE <- TRUE
+    ALIGN 					<- FALSE
+    BOTH 					<- TRUE
+    USE.ONLINE.ANNOTATION 	<- TRUE
+    USE.EDGER 				<- TRUE
+    USE.DESEQ2 				<- TRUE
+    reference 				<- "./ref/Gg_GRGc7b.fna"
+    annotation 				<- "./ref/Gg_GRGc7b.gtf"
+    release 				<- "GRCg6a"
+    target.organism 		<- 'Gallus gallus'
+    ens.version 			<- '106'
+    mart.name 				<- 'ggallus_gene_ensembl'
+    org.package 			<- "org.Gg.eg.db"
+    n.genes 				<- 1000
+    fastq.dir 				<- 'fastq_dir'
+    alignment.dir 			<- 'STAR-aln'
+	feature.count.dir		<- "feature_counts"
+    rnaseq.out 				<- 'rnaseq.out'
+    my.name 				<- 'J. R. Valverde'
+    my.email 				<- '<jrvalverde@cnb.csic.es>'
+    my.user 				<- 'sci'
+    my.password 			<- "password"
+    metadata 				<- './SampleInfo.tab'
+    cpm.threshold 			<- 0.5
+    significance.threshold 	<- 1
+    design.column 			<- "sample"
+    config.file 			<- NULL
+    INTERACTIVE 			<- FALSE
+    VERBOSE 				<- TRUE
 
 
     # this is a default options file that the user may have with
@@ -43,7 +45,7 @@ get.options <- function()
 
     # check if there is a user-defined global default options file that
     # will override global defaults
-    if (file.exists(paste('~/', default.config.file, sep=''))
+    if (file.exists(paste('~/', default.config.file, sep='')))
         source(paste('~/', default.config.file, sep=''))
     # check if there is a per-directory user-defined default options file
     # that will override global and user-global defaults
@@ -60,29 +62,33 @@ get.options <- function()
         #-h / --help is added by default
 
         # options for basic setup
-        make_option(c("-a", "--align"), 
+        make_option(c("-A", "--align"), 
             action="store_true", 
             help=paste("whether to align fastq reads to the reference [default", ALIGN, "]")),
 
-        make_option(c("-b", "--both-ends"), 
+        make_option(c("-B", "--both-ends"), 
             action="store_true", 
             help=paste("whether both ends of paired reads must match [default", BOTH, "]")),
 
-        make_option(c("-l", "--onLine-annotation"), 
+        make_option(c("-L", "--onLine-annotation"), 
             action="store_true", 
             help=paste("whether to use online annotation [default", USE.ONLINE.ANNOTATION, "]")),
 
-        make_option(c("-e", "--edgeR"), 
+        make_option(c("-E", "--edgeR"), 
             action="store_true", 
             help=paste("whether to apply the edgeR analysis [default", USE.EDGER, "]")),
 
-        make_option(c("-d", "--DESeq2"), 
+        make_option(c("-D", "--DESeq2"), 
             action="store_true", 
             help=paste("whether to apply the DESeq2 analysis [default", USE.DESEQ2, "]")),
 
        make_option(c("-r", "--reference"), 
             type="character", 
             help=paste("reference name (without extensions) [default", reference, "]")),
+
+       make_option(c("-a", "--annotation"), 
+            type="character", 
+            help=paste("GTF/GFF file containing genome annoation [default", annotation, "]")),
 
        make_option(c("-R", "--release"), 
             type="character", 
@@ -92,7 +98,7 @@ get.options <- function()
             type="character", 
             help=paste("the target organism name [default", target.organism, "]")),
 
-       make_option(c("-E", "--ENSEMBL-version"), 
+       make_option(c("-V", "--ENSEMBL-version"), 
             type="character", 
             help=paste("the version of ENSEMBL to use for annotation[default", ens.version, "]")),
 
@@ -110,13 +116,17 @@ get.options <- function()
 
        make_option(c("-f", "--fastq-dir"), 
             type="character", 
-            help=paste("the name of the folder containing the FASTq files [default", fastq.data, "]")),
+            help=paste("directory containing the FASTq files [default", fastq.dir, "]")),
 
-       make_option(c("-A", "--alignment-dir"), 
+       make_option(c("-a", "--alignment-dir"), 
             type="character", 
-            help=paste("the name of the folder to save the aligned reads [default", alignment.dir, "]")),
+            help=paste("directory containing alignments SAM files [default", alignment.dir, "]")),
+			
+       make_option(c("-c", "--feature-count-dir"), 
+            type="character", 
+            help=paste("directory containing the feature count data [default", feature.count.dir, "]")),
 
-       make_option(c("-o", "--output"), 
+       make_option(c("-o", "--output-dir"), 
             type="character", 
             help=paste("the name of the folder to save the output [default", rnaseq.out, "]")),
 
@@ -140,7 +150,7 @@ get.options <- function()
             type="character", 
             help=paste("metadata file with eXtra eXperiment information [default", metadata, "]")),
 
-       make_option(c("-c", "--cpm-threshold"), 
+       make_option(c("-t", "--cpm-threshold"), 
             type="double", 
             help=paste("minimum number of CPM to keep a sample [default", cpm.threshold,"]")),
 
@@ -173,7 +183,7 @@ get.options <- function()
 
     # check if a config file was specified in the command line, and
     # source it before assigning the other command line variables
-    if (! is.null(opt$config_file) source(opt$config_file)
+    if (! is.null(opt$config_file)) source(opt$config_file)
 
     # command-line options will take precedence over any file-defined options
     # -- even options from a file specified in the command line
@@ -204,29 +214,31 @@ get.options <- function()
     # we  know they were given in the command line if they are not NULL
     if (! is.null(opt$align)) ALIGN <- opt$align
     if (! is.null(opt$both_ends)) BOTH <- opt$both_ends
-    if (! is.null(opt$online_annotation) USE.ONLINE.ANNOTATION <- opt$online_annotation
-    if (! is.null(opt$edgeR) USE.EDGER <- opt$edgeR
-    if (! is.null(opt$DESeq2) USE.DESEQ2 <- opt$DESeq2
-    if (! is.null(opt$reference) reference <- opt$reference
-    if (! is.null(opt$release) release <- opt$release
-    if (! is.null(opt$target_organism) target.organism <- opt$target_organism
-    if (! is.null(opt$ENSEMBL_version) ens.version <- opt$ENSEMBL_version
-    if (! is.null(opt$mart_name) mart.name <- opt$mart_name
-    if (! is.null(opt$Org_package) org.package <- opt$Org_package
-    if (! is.null(opt$n_genes) n.genes <- opt$n_genes
-    if (! is.null(opt$fastq_dir) fastq.data <- opt$fastq_dir
-    if (! is.null(opt$alignment_dir) alignment.data <- opt$alignment_dir
-    if (! is.null(opt$output) rnaseq.out <- opt$output
-    if (! is.null(opt$my_name) my.name <- opt$my_name
-    if (! is.null(opt$my_email) my.email <- opt$my_email
-    if (! is.null(opt$my_sql_username) my.user <- opt$my_sql_username
-    if (! is.null(opt$my_sql_password) my.password <- opt$my_password
-    if (! is.null(opt$metadata) metadata <- opt$metadata
-    if (! is.null(opt$cpm_threshold) cpm.threshold <- opt$cpm_threshold
-    if (! is.null(opt$comparison_column) design.column <- opt$comparison_column
-    if (! is.null(opt$config_file) config.file <- opt$config_file
-    if (! is.null(opt$verbose) VERBOSE <- opt$verbose
-    if (! is.null(opt$interactive) INTERACTIVE <- opt$interactive
+    if (! is.null(opt$online_annotation)) USE.ONLINE.ANNOTATION <- opt$online_annotation
+    if (! is.null(opt$edgeR)) USE.EDGER <- opt$edgeR
+    if (! is.null(opt$DESeq2)) USE.DESEQ2 <- opt$DESeq2
+    if (! is.null(opt$reference)) reference <- opt$reference
+    if (! is.null(opt$annotation)) annotation <- opt$annotation
+    if (! is.null(opt$release)) release <- opt$release
+    if (! is.null(opt$target_organism)) target.organism <- opt$target_organism
+    if (! is.null(opt$ENSEMBL_version)) ens.version <- opt$ENSEMBL_version
+    if (! is.null(opt$mart_name)) mart.name <- opt$mart_name
+    if (! is.null(opt$Org_package)) org.package <- opt$Org_package
+    if (! is.null(opt$n_genes)) n.genes <- opt$n_genes
+    if (! is.null(opt$fastq_dir)) fastq.dir <- opt$fastq_dir
+    if (! is.null(opt$alignment_dir)) alignment.data <- opt$alignment_dir
+    if (! is.null(opt$feature_count_dir)) feature.count.dir <- opt$feature_count_dir
+    if (! is.null(opt$output_dir)) rnaseq.out <- opt$output_dir
+    if (! is.null(opt$my_name)) my.name <- opt$my_name
+    if (! is.null(opt$my_email)) my.email <- opt$my_email
+    if (! is.null(opt$my_sql_username)) my.user <- opt$my_sql_username
+    if (! is.null(opt$my_sql_password)) my.password <- opt$my_password
+    if (! is.null(opt$metadata)) metadata <- opt$metadata
+    if (! is.null(opt$cpm_threshold)) cpm.threshold <- opt$cpm_threshold
+    if (! is.null(opt$comparison_column)) design.column <- opt$comparison_column
+    if (! is.null(opt$config_file)) config.file <- opt$config_file
+    if (! is.null(opt$verbose)) VERBOSE <- opt$verbose
+    if (! is.null(opt$interactive)) INTERACTIVE <- opt$interactive
 
     # return options list
     options <-list(
@@ -236,14 +248,16 @@ get.options <- function()
                    USE.EDGER=USE.EDGER,
                    USE.DESEQ2=USE.DESEQ2,
                    reference=reference,
+				   annotation=annotation,
                    release=release,
                    target.organism=target.organism,
                    ens.version=ens.version,
                    mart.name=mart.name,
                    org.package=org.package,
                    n.genes=n.genes,
-                   fastq.data=fastq.data,
+                   fastq.dir=fastq.dir,
                    alignment.dir=alignment.dir,
+				   feature.count.dir=feature.count.dir,
                    rnaseq.out=rnaseq.out,
                    my.name=my.name,
                    my.user=my.user,
@@ -267,7 +281,6 @@ save.options <- function(options, file='')
     if (! is.list(options))
         return(FALSE)
         
-    
     if (file != '') {
         # we need to open a connection, otherwise only the last line 
         # will be saved
@@ -278,8 +291,8 @@ save.options <- function(options, file='')
         out <- file
     }
     
-    for (i in 1:length(opt)) 
-        cat(names(opt)[i], '=', opt[[i]], '\n', file=out)
+    for (i in 1:length(options)) 
+        cat(names(options)[i], '=', options[[i]], '\n', file=out)
     
     if (out != '') 
         close(out)

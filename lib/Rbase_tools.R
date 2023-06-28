@@ -28,9 +28,9 @@ getScriptPath <- function() {
      
     # this works if we were called with 'source()'
     src.path <- getSrcFilename(function() {}, full.names=T)
-    if (! is.null(src.path) &&  length(src.path) != 0)
+    if (! is.null(src.path) && src.path != ""){
         return(src.path)
-
+	}
     # this works for Rscript, it may match more than one path
     # if Rscript was used with several --file= arguments, in
     # which case we will return *only* the first one
@@ -211,7 +211,7 @@ cat.info <- function(...) {
 #'
 #' @export
 #
-use.package <- function(p, silent=F) {
+use.package <- function(p, silent = F, VERBOSE = F) {
     ### NOTE: we should likely try CRAN first, Bioconductor afterwards,
     ### install.packages offline, devtools::install and install_github
     ### for now we will kepp it simple
@@ -223,7 +223,7 @@ use.package <- function(p, silent=F) {
         if (!is.element('BiocManager', installed.packages()[,1])) {
             install.packages('BiocManager', dependencies=TRUE)
         }
-        BiocManager::install(p, dep=TRUE)
+        BiocManager::install(p, dep = TRUE)
         
     }
     # this will fail for 'banneR' which is neither on CRAN nor on
@@ -297,11 +297,11 @@ use.packages <- function(pkgs){
 #'
 #' @export
 #
-sourceDir <- function(path, trace = TRUE, ...) {
+sourceDir <- function(path, trace = TRUE, VERBOSE = F, ...) {
    for (nm in list.files(path, pattern = "[.][RrSsQq]$")) {
-      if (VERBOSE) cat(nm,":")
+      if (VERBOSE) cat(nm,":", sep="")
       source(file.path(path, nm), ...)
-      if (VERBOSE) cat("\n")
+      if (VERBOSE) cat(" LOADED\n")
    }
 }
 
@@ -527,8 +527,8 @@ title <- function(text='', level=1) {
 #'
 #' @export
 #'
-openLogFile <- function(file='zygR.log', remove=F, append=F, new.version=T) {
-    if (remove || overwrite) {
+openLogFile <- function(file='zygR.log', overwrite = F, append = F, new.version=T) {
+    if (overwrite) {
         if (file.exists(file)) file.remove(file)
 
         #logFile <- file(file, open="wt");
@@ -1007,7 +1007,7 @@ continue.on.enter <- function(prompt='Press ENTER to continue: ', interactive=F)
 #' @export
 #
 more.columns <- function (data, columns=c(1:dim(data)[2]), lines=20, header='', prompt="More? ") {
-    usePackage('keypress')
+    use.package('keypress')
 #library(keypress)
 
     maxln <- dim(data)[1]
@@ -1163,18 +1163,19 @@ show.data.frame <- function(df,
 #
 as.png <- function(PLOT=NULL, 
                    file='out.png', width=1024, height=1024, 
-                   overwrite=TRUE) {
+                   overwrite=TRUE, VERBOSE = F) {
     if (is.null(file)) {
         tryCatch(print(PLOT))
-    } else if ( overwrite | ! file.exists(file)  ) {
-        if (VERBOSE)
-            cat("as.png(): creating", file, '\n')
-        tryCatch( {
+    } else if ( overwrite || ! file.exists(file) ) {
+        if (VERBOSE){
+            cat("as.png(): creating", file, "\n")
+        }
+		tryCatch( {
                 png(file, width=width, height=height)
                 print(PLOT)
             },
-            finally=dev.off()
+            finally = dev.off()
         )
     }
-    return ()
+    return()
 }
