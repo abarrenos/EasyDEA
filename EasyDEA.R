@@ -102,6 +102,8 @@ use.package("cluster")
 use.package("factoextra")
 use.package("fpc")
 use.package("NbClust")
+use.package("clusterProfiler")
+use.package("enrichplot")
 
 use.package("tcltk")
 use.package("gWidgets2")
@@ -279,7 +281,7 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
 	# If AnnotationHub does not work, try to retrieve NCBI annotation
 	# directly from org.package if it exists.
 
-	if ( ! exists('org.db')) {			
+	if ( is.null(org.db)) {			
 		if ( ! require(org.package, character.only = TRUE, quietly = TRUE)) {
 			BiocManager::install(org.package) }
 
@@ -287,11 +289,12 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
 		require(org.package, character.only = TRUE)
 		org.db <- get(org.package)
 	}
-}
+	
+} else }
 
-# If that didn't work, try offline
-if (is.null(org.db)) {
-     # then try to build off-line annotation
+# Build offline annotation
+#if (is.null(org.db)) {
+     
      if ( ! require(org.package, character.only=T)) {
         #-----------------------------------------------
         # Create Org Package
@@ -366,10 +369,10 @@ if (is.null(org.db)) {
 # ---------------------------------------------------------------
 short.title('BiomaRt Annotation')
 
-if ( file.exists(paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/')) ) {
+if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) ) {
    # we have aready retrieved and saved the annotation, use it
     bm.annot.1 <- read.table(
-    		file=paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/'), 
+    		file=paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/'), 
 	        sep='\t', header=T)
 } else {
     # get all the annotation
@@ -495,7 +498,7 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/
     bm.annot.1 <- merge(bm.annot.1, bm.goslim.annot.1, by="ensembl_gene_id")
     bm.annot.1 <- merge(bm.annot.1, bm.extra.annot.1,  by="ensembl_gene_id")
 
-    write.table(bm.annot.1, file = paste(annotation.dir, 'biomaRt.full.annotation.1st.tab', sep='/'), 
+    write.table(bm.annot.1, file = paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/'), 
 				sep='\t', row.names=T, col.names=T)
     # we save it to avoid repeating this in the future
 
@@ -589,8 +592,9 @@ if (USE.EDGER) {
     # ---------------------------------------------------------------
 
     short.title('EdgeR Analysis')
-
-    dge <- eR.differential.gene.expression(counts, 
+	Sys.sleep(1)
+    
+	dge <- eR.differential.gene.expression(counts, 
     			metadata = sampleInfo,
 				design.column = design.column,
                 cpm.threshold = cpm.threshold,
@@ -598,24 +602,26 @@ if (USE.EDGER) {
                 ens.db = ens.db, 
                 folder = folder)
     
-    fit <- eR.dge.voom.variation.analysis(dge, design.column, folder)
+    fit <- eR.voom.variation.analysis(dge, folder)
 
-    fit <- eR.fit.annotate.ensembl.biomart.save(fit,
-    					   				   		ens.db, 
-                                           		bm.annot.1, 
-                                           		folder, 
-                                           		n.genes)
+    fit <- eR.fit.annotate.save(fit,
+    					   		ens.db, 
+                                biomart.ann, 
+                                folder, 
+                                n.genes)
 
-    # now create a volcano plot for only the top 1/2 genes using gene
-    # annotation
-    out.png <- paste(folder, '/edgeR/img/edgeR_volcanoplot.png', sep='')
-    as.png(volcanoplot(fit, highlight=n.genes/2, coef=1, names=fit$genes$SYMBOL),
-        out.png)
-
-    # testing relative to a threshold
-    fit.thres <- eR.fit.treat(fit, threshold=signif.threshold, folder)
+    # Now create Volcano plot for each coefficient (comparison) from our fitted
+	# model, for only the top 1/2 genes using gene annotation
+	for (i in 1:ncol(fit)){
+		coefficient <- colnames(fit)[i]
+		out.png <- paste(folder, '/edgeR/img/edgeR_volcanoplot_', coefficient,'.png', sep='')
+		as.png(volcanoplot(fit, highlight = n.genes/2, coef = i, names=fit$genes$SYMBOL, cex=0.8, pch=1),
+        	out.png)
+	}
+    # Testing Differentially expressed genes relative to a threshold
+    fit.thres <- eR.fit.treat(fit, threshold = significance.threshold, folder)
     
-    # save all the contents of 'fit' in an RDS file
+    # Save all the contents of 'fit' in an RDS file
     saveRDS(fit, file=paste(folder, '/edgeR/annotatedVOOMfit+.rds', sep=''))
     saveRDS(fit.thres, 
             file=paste(folder, '/edgeR/annotatedVOOMfit+.gt.',
@@ -624,8 +630,8 @@ if (USE.EDGER) {
     #		fit <- readRDS(file=paste(folder, '/annotatedVOOMfit+.rds', sep=''))
     # and save as well as Rdata file
     save(fit, file=paste(folder, '/edgeR/annotatedVOOMfit+.RData', sep=''))
-    save(fit, 
-         file=paste(folder, '/edgeR/annotatedVOOMfit+.gt.',
+    save(fit.thres, 
+         file = paste(folder, '/edgeR/annotatedVOOMfit+.gt.',
                     significance.threshold, '.RData', sep=''))
     #	'fit' can later be recovered with: 
     #		fc <- load(file=paste(folder, '/annotatedVOOMfit+.RData', sep=''))
@@ -640,7 +646,7 @@ if (USE.EDGER) {
     # 
     # this carries out all comparisons and annotates each fit obtained
     # saving all of them in a list
-    eR.data <- eR.dge.all.comparisons(dge, design.column, ens.db, bm.annot.1, folder)
+    eR.data <- eR.dge.all.comparisons(dge, design.column, ens.db = ens.db, biomart.ann = bm.annot.1, folder)
 
     # now eR.data is a list where each element is a comparison A-B (A minus B),
     # i.e. each A-B is a list of tables, one of them named "table" and containing
@@ -650,6 +656,10 @@ if (USE.EDGER) {
     # defining a threshold. But that implies we know of a meaningful one, which
     # we don't yet.
 
+	short.title('EdgeR Analysis Finished !')
+	cat("\n\n")
+	Sys.sleep(1)
+
 }    # end if (USE.EDGER)
 
 
@@ -657,11 +667,7 @@ if (USE.EDGER) {
 #################################################################
 #
 #################################################################
-                                                                #
-#################################################################
-#
-#################################################################
-                                                                #
+                                                               
 #################################################################
 
 # ---------------------------------------------------------------
@@ -669,167 +675,183 @@ if (USE.EDGER) {
 # ---------------------------------------------------------------
 
 if (USE.DESEQ2) {
-    # get counts
-    if (exists(get.name.of(fc))
-        countData <- fc$counts
-    else {
-        ### NOTE @@
-        # this should not be needed
-        countDataFile <- paste(folder, "/featureCounts.csv", sep='/')
+	
+	short.title('DESeq2 Analysis')
+	Sys.sleep(1)
 
-        countData <- read.csv(countDataFile,
-		        row.names=1) %>%
-		        as.matrix()
-    }
-    countData <- countData[rowSums(countData)>1, ]
-
+	countData <- counts
+	colData <- sampleInfo
     if (VERBOSE) print(head(countData))
-
-    # get metadata
-    colData <- read.delim(paste(rnaseq.out, metadata, sep='/'))
-
-    name <- paste(folder, "DESeq2/dds.DESeq2", sep='/')
-    if ( ! file.exists(paste(name, "rds", sep='.')) ) {
-
-        dds <- DESeqDataSetFromMatrix(countData, 
-                                      colData,  
-                                      design=paste('~', design.column, sep='') 
+	
+	# Create DESeq objects to compare samples by design.column
+    out.base <- paste(folder, "/DESeq2/dds.DESeq2.", design.column, sep='')
+    
+	if ( file.exists(paste(out.base, "rds", sep='.')) ) {
+        dds <- readRDS(file=paste(out.base, "rds", sep='.'))	
+		
+	} else {
+	
+		cat("\n\tGenerating DESeq Object\n\n")
+        dds <- DESeqDataSetFromMatrix(countData = countData, 
+                                      colData = colData,  
+                                      design = as.formula(paste("~", design.column)), 
                                       tidy=F)
-
         dds <- DESeq(dds)
 
         # SAVE DESEQ ANALYSIS
-        # -------------------
-        name <- paste(folder, "/DESeq2/dds.DESeq2", sep='')
-        save(dds, file=paste(name, "RData", sep='.'))
-        #	'dds' can later be recovered with: 
-        #		dds <- load(file=paste(folder, "/dds.DESeq2.RData", sep=''))
-        saveRDS(dds,  file=paste(name, "rds", sep='.'))
-        # read as follows:    
-    } else {
-        dds <- readRDS(file=paste(name, "rds", sep='.'))
+        # -------------------        
+		save(dds, file = paste(out.base, "RData", sep='.'))
+        saveRDS(dds, file = paste(out.base, "rds", sep='.'))
     }
 
-    cat("DESeq2 analysis produced the following fit")
+    cat("\n\tDESeq2 analysis produced the following models\n\n")
     print(resultsNames(dds))
+	
+	## Perform all pairwise comparisons available in DESeq2 model
+	
+	comparisons <- resultsNames(dds)[2:length(resultsNames(dds))]
+	dds.results <- list()
 
-    annot <- ds2.get.annotation.ens.org(dds, ens.db, org.db)
-    ens.ann <- annot$ens.ann		### NOTE we could use attach here
-    ens.ann.1 <- annot$ens.ann.1	# but this is more explicit
-    geneSymbols <- annot$geneSymbols
-    go.ann <- annot$go.ann
-    GOdescription <- annot$GOdescription
+	for (comparison in comparisons){
+		if (comparison == "Intercept") next
+		
+        cat("\n                                    ")						
+		cat("\nComputing DGE:",	  comparison,	"\n")
+		cat(  "==================================\n")
+
+		contrast <- str_split(comparison, pattern = "_")[[1]][c(1, 2, 4)]	#Ex: c("Sample", "DF1.PC", "DF1")
+
+		out.file.base <- paste("dds", comparison, sep = ".")				#Ex: "dds.Sample.DF1_PC.vs.DF1"
+		
+		# Perform comparison, shrinkage, annotate and identify significant changes.
+		dds.results[[comparison]] <- analysePlotDESeq(
+							dds = dds,
+							contrast = contrast,
+							filterFun = ihw,
+							alpha = 0.01,
+							shrnk.type = 'apeglm',
+							annotate = TRUE, 
+							ensembl.db = ens.db,
+							biomart.db = bm.annot.1,
+							org.db = org.db,
+							annotation.dir = paste(folder, "annotation", sep = "/"),
+							save = TRUE,
+							out.file.base = out.file.base,
+							out.dir = folder)
+	
+		dds.results[[comparison]]$result.ann %>% head(10)
+	}
+	
+    #annot <- ds2.get.annotation.ens.org(dds, ens.db, org.db)
+    #ens.ann <- annot$ens.ann		### NOTE we could use attach here
+    #ens.ann.1 <- annot$ens.ann.1	# but this is more explicit
+    #geneSymbols <- annot$geneSymbols
+    #go.ann <- annot$go.ann
+    #GOdescription <- annot$GOdescription
     
-    ### NOTE
-    # change by function
-    # annotate with ensembl ens.db
-    ens.ann <- ensembldb::select(ens.db, 
-                      column='GENEID', keytype= 'GENEID', keys=rownames(dds), 
-                      columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION', # no longer available
-                                 'GENENAME', 'GENEID', 'ENTREZID', # empty
-                                 'TXID', 'TXBIOTYPE', # these make the call fail
-                                 'PROTEINID', 'UNIPROTID' # no longer available
-                                ))
-
-    ann <- ensembldb::select(ens.db, 
-                  keytype= 'GENEID', keys=rownames(fit), 
-                  columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION',
-                             'GENENAME', 'GENEID', 'ENTREZID', 
-                              'TXNAME', 'TXBIOTYPE', 
-                              'PROTEINID', 'UNIPROTID'))
-
-    ens.ann.1 <- ens.ann[ ! duplicated(ens.ann$GENEID), ]
-
     # Add annotation to dds to keep everything in one place
     #dds$ens.annot.1 <- ens.ann.1
-    #dds$bm.annot.1 <- b,.annot.1
+    #dds$bm.annot.1 <- bm.annot.1
 
-    #
-    # Extract annotation using Org object if avaiable
-    #
-    if ( ! is.null(org.db) ) {
+    
+    # Now result list contains annotation of EnsemblDB, BiomaRt and ORG.Db (if provided)
+	# Org.DB packages are not available for all organisms, so by default, is set to NULL.
+	
+	if (FALSE){
+	if ( ! is.null(org.db) ) {
 
-        # and now we should be able to use the Org package if we successfully built it
-        # at the beginning.
-        geneSymbols <- mapIds(org.db, 
-                              keys=as.character(dfwt_vs_0.1$genes$ENTREZID), 
-                              column="ENTREZID", 
-                              keytype="ENTREZID", 
-                              multiVals="first")
+		for (res in names(dds.results)){
+			
+			res.ann <- dds.results[[res]]$result.ann
 
+			# And now we should be able to use the Org package if we successfully built it
+			# at the beginning.		
+			gene.id <- rownames(res.ann)
+			entrez <- as.character(res.ann$ENTREZID)
 
-        # retrieve go ids
-        go.ann <- AnnotationDbi::select(org.Ggallus.eg.db, 
-	        keys=as.character(dfwt_vs_0.1$genes$ENTREZID), 
-                columns=c("ENTREZID", "GO", "GOALL", "ONTOLOGY","ONTOLOGYALL"), 
-                keytype="GID", 
-                multiVals="CharacterList")
+			# Check the information we can retrieve from the database
+			keytypes(org.db)
 
-        # retrieve corresponding descriptions
-        GOdescription <- AnnotationDbi::select(GO.db, keys=go.ann$GO, 
-                         columns= c("GOID", "TERM", "DEFINITION", "ONTOLOGY"), 
-                         keytype= "GOID")
+			# Retrieve Gene Ontology IDs
+			ncbi.ann <- AnnotationDbi::select(org.db, 
+				    		keys = gene.id, 
+				    		columns = c("ENTREZID", "GENENAME", "GENETYPE", "SYMBOL",
+										#"ALIAS", "ENZYME", "ACCNUM", "PMID",
+										#"UNIPROT", "PROSITE", "PFAM",
+										"GO", "GOALL","ONTOLOGYALL", "PATH"), 
+				    		keytype = "SYMBOL", 
+				    		multiVals = "CharacterList")
 
-    }
-
-
+			# Retrieve Gene Ontology descriptions
+			GO.ann <- AnnotationDbi::select(GO.db,
+							keys = ncbi.ann$GO, 
+							columns = c(	"GOID", "TERM", "DEFINITION", "ONTOLOGY"),
+							keytype = "GOID")
+							
+			for (i in colnames(GO.id)){
+				go.ann[i] <- Go.id[match(res.ann$gene.id, ensembl.ann[,by]), i]
+			}	
+		}
+	}
+	}
     # SAVE SELECTED COMPARISONS
     # -------------------------
     # We will get all comaprisons
-    for (a in levels(as.factor(target[ , design.column])) ) {
-        for (b in levels(as.factor(target[ , design.column])) ) {
-            print(paste(a, b))
-            if (a == b) next
-            ds2.dds.compare.annotate.save( 
-                            dds,
-                            column=design.column,
-                            x=a, y=b,
-                            filterFun=ihw, alpha=0.01,
-                            ensembl.ann=ens.ann.1,
-                            biomart.ann=bm.annot.1,
-                            outDir=folder
-                            )
-
-        }
-    }
-
-
-
+    #for (a in levels(as.factor(target[ , design.column])) ) {
+    #    for (b in levels(as.factor(target[ , design.column])) ) {
+    #        print(paste(a, b))
+    #        if (a == b) next
+    #        ds2.dds.compare.annotate.save( 
+    #                        dds,
+    #                        column=design.column,
+    #                        x=a, y=b,
+    #                        filterFun=ihw, alpha=0.01,
+    #                        ensembl.ann=ens.ann.1,
+    #                        biomart.ann=bm.annot.1,
+    #                        outDir=folder
+    #                        )
+	#
+    #    }
+    #}
+	#
+	#
+	#
     # SAVE GENES WITH SIGNIFICANT CHANGES
     # -----------------------------------
-
-    ds.data <- list()
+	#
+    #ds.data <- list()
     #x <- 0
-    contr <- design.column
-    grps <- levels(colData[ , contr ])
-    for (a in grps) {
-        for (b in grps) {
-            print(paste(a, b))
-            if (a == b) next
-            res <- ds2.dds.plot.and.save( 
-                            dds, contr,
-                            x=a, y=b,
-                            filterFun=ihw, alpha=0.01,
-                            ensembl.ann=ens.ann.1,
-                            biomart.ann=bm.annot.1,
-                            outDir=folder
-                            )
-            print(names(res))
-	        name <- paste(contr, "_", a, "_", b, sep='')
-            #x <- x + 1
-            #ds.data[[x]] <- res
-            ds.data[[name]] <- res
-            #names(ds.data)[x] <- name
-            #stop()
-        }
-    }
-    print(names(ds.data))
+    #contr <- design.column
+    #grps <- levels(colData[ , contr ])
+    #for (a in grps) {
+    #    for (b in grps) {
+    #        print(paste(a, b))
+    #        if (a == b) next
+    #        res <- ds2.dds.plot.and.save( 
+    #                        dds, contr,
+    #                       x=a, y=b,
+    #                        filterFun=ihw, alpha=0.01,
+    #                        ensembl.ann=ens.ann.1,
+    #                        biomart.ann=bm.annot.1,
+    #                        outDir=folder
+    #                        )
+    #        print(names(res))
+	#        name <- paste(contr, "_", a, "_", b, sep='')
+    #        #x <- x + 1
+    #        #ds.data[[x]] <- res
+    #        ds.data[[name]] <- res
+    #        #names(ds.data)[x] <- name
+    #        #stop()
+    #    }
+    #}
+	
+    print(names(dds.results))
 
     if (INTERACTIVE) {
-        ds2.interactively.print.n.most.significant.de.genes(ds.data, n=10)
+        ds2.interactively.print.n.most.significant.de.genes(dds.results, n=10)
 
-        ds2.interactively.plot.top.up.down.regulated.genes(dds, 
-                                                           ds.data, 
+        ds2.interactively.plot.top.up.down.regulated.gene(	dds, 
+                                                           dds.results, 
                                                            design.column)
     }
 
@@ -837,8 +859,10 @@ if (USE.DESEQ2) {
     # -------------------------------
     # Do Gene Set Enrichment Analysis
     # -------------------------------
+	
+	short.title('Gene Set Enrichment Analysis')
 
-
+	ds.data <- dds.results
     # we do not know what is the best upper limit, so we'll try several
     ms <- 500 # default value in GSEA, should work as well as the others
     #for (ms in c(50, 100, 250, 500)) {
@@ -847,7 +871,7 @@ if (USE.DESEQ2) {
             # for each comparison name
             cmp.data <- ds.data[[ cmp.name ]]
             cat('Doing GSEA on', cmp.name, '\n')
-            ann.shrunk.lfc <- cmp.data[[ "shrunk.annot" ]]
+            ann.shrunk.lfc <- cmp.data[[ "shrunk.ann" ]] %>% as.data.frame()
 
     #        #ms <- 500 
     #        #out.dir <- paste(folder, "DESeq2/GO_fgsea", cmp.name, sep='/')
@@ -862,18 +886,21 @@ if (USE.DESEQ2) {
     #        # we should add fgsea results to the cmp.data list
     #        ds.data[[cmp.name]][['go.fgsea']] <- gogsea
 
-            #ms <- 500 
             out.dir <- sprintf("%s/DESeq2/GO+KEGG_cProf/max.size=%03d/%s",
                     folder, ms, cmp.name)
             dir.create(out.dir, showWarning=FALSE, recursive=TRUE)
-            GO_KEGG_clusterProfiler(
-                          ann.shrunk.lfc, 
-		          max.size=ms,
-                          out.dir=out.dir, 
-                          out.name='cProf',
-                          use.description=TRUE,
-                          verbose=FALSE)
-        }
+						  
+						  
+			GO_KEGG_clusterProfiler(ann.shrunk.lfc = ann.shrunk.lfc,
+									max.size = ms,
+									out.dir = out.dir, 
+									out.name = 'GO_cProf',
+						  			use.description = TRUE,
+						  			OrgDb = org.db,
+						  			top.n = 10,
+						  			top.biblio = 5,
+						  			verbose = FALSE)
+		}
     }
 
 

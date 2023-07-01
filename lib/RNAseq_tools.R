@@ -1203,7 +1203,7 @@ eR.save.top.annotated <- function(fit, folder, n.genes=500, sort.by='p', coef=1,
                       '_by_', by, 
                       '_annotated.tab', 
                       sep='')
-        write.table(tt, file, w.names=T, col.names=T, sep='\t')
+        write.table(tt, file, row.names=T, col.names=T, sep='\t')
     }
 }
 
@@ -1258,10 +1258,10 @@ eR.save.top.ann.thresh <- function(fit, folder, n.genes=500, sort.by='p', coef=1
 
 eR.fit.annotate <- function(fit, ens.db, biomart) {
 
-     if (str_subrownames(fit, 1, 3) == "ENS")
-         by='GENEID'
-     else
-     	by='ENTREZID'
+	if (all(str_sub(rownames(fit), 1, 3) == "ENS")){
+        by='GENEID'
+    }else{
+    	by='GENENAME'}
         
      ens.ann <- ensembldb::select(ens.db, 
                   column=by, 
@@ -1290,7 +1290,7 @@ eR.fit.annotate <- function(fit, ens.db, biomart) {
     #	This works if they are in the same order
     #fit$genes <- ens.ann.1
     #	This works by matching rownames and gene IDs
-    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1$GENEID), ]
+    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[,by]), ]
     rownames(fit$genes) <- rownames(fit)
     #
     # add biomart annotation
@@ -1383,7 +1383,7 @@ eR.differential.gene.expression<- function(counts,
     # only the rows that exceed the threshold at least in three different
     # cases(experiments .bam files)
 
-    cat(paste("\nFiltering genes by CPM threshold", cpm.threshold, "\n"))
+    cat(paste("\n\tFiltering genes by CPM threshold", cpm.threshold, "\n\n"))
     thres <- cpm.counts > cpm.threshold		# 0.5 for Gallus
     keep <- rowSums(thres) >=3
     counts.keep <- counts[keep,]
@@ -1425,7 +1425,7 @@ eR.differential.gene.expression<- function(counts,
 	dge$samples$group <- as.factor(metadata[ ,design.column])
     
 	# do TMM normalization
-    cat("\nCalculating TMM normalization factors\n")
+    cat("\n\tCalculating TMM normalization factors\n\n")
     dge <- calcNormFactors(dge)
     if (VERBOSE) print(dge$samples)
 
@@ -1475,7 +1475,7 @@ eR.differential.gene.expression<- function(counts,
     # We apply a funcion that calculates the variance by rows (genes) and then
     # retrieve the n.genes most DE genes
 
-    cat(paste("\nCalculating top", n.genes, "genes with the highest variance\n"))   
+    cat(paste("\n\tCalculating top", n.genes, "genes with the highest variance\n\n"))   
 	var_genes <- apply(logcpm, by.rows, var)
     select_var <- names(sort(var_genes, decreasing=TRUE))[1:n.genes]
     highly_var <- logcpm[select_var,]
@@ -1527,7 +1527,10 @@ eR.differential.gene.expression<- function(counts,
 			}, out.png )
 
     # We can automate the estimation of the dispersion and add it to the dge object
-    dge <- estimateCommonDisp(dge)
+    cat("\n\tEstimating Dispersion\n")
+	cat("\n\tGenerating DGEList object\n\n")
+
+	dge <- estimateCommonDisp(dge)
 
     # And now we can estimate gene-wise dispersion estimates allowing for a
     # possible trend with average count size. These will allow us to use a GLM
@@ -1542,7 +1545,7 @@ eR.differential.gene.expression<- function(counts,
     return(dge)
 }
 
-eR.dge.voom.variation.analysis <- function(dge, design.column, folder)
+eR.voom.variation.analysis <- function(dge, folder)
 {
      ############## JR #########################
     # 
@@ -1723,67 +1726,110 @@ eR.dge.voom.variation.analysis <- function(dge, design.column, folder)
     # 0+ forces the design to include all groups and not have
     # an intercept (reference) column
 
-    #design <- model.matrix(~0 + target[ , design.column])
-    #design
-    design <- model.matrix(~ target[ , design.column])
-    colnames(design) <- levels(as.factor(target[ , design.column]))
-    rownames(design) <- rownames(target)
+	#target <- as.factor(metadata[, design.column])
+    #design <- model.matrix(~  target)
+    #colnames(design) <- levels(target)
+    cat("\n\tGenerating Design Matrix\n\n")
+
+    design <- model.matrix(~ dge$sample$group)
+    colnames(design) <- c("Intercept", levels(dge$sample$group)[-1])
+	rownames(design) <- rownames(dge$sample)
     if (VERBOSE) print(design)
 
     # IF WE DO NOT INCLUDE THE "~ 0 + " IN THE FORMULA, MODEL.MATRIX()
     # WILL USE AS REFERENCE THE FIRST ALPHABETICAL ORDER LEVEL !!!
     # 
-    # another problem is that we are limited to the comparisons defined by
+    # Another problem is that we are limited to the comparisons defined by
     # coefficents, if we want more control we need to use makeContrasts
     #
-    # the same applies for the following analyses
-
-    # Let us test for differential expression with the DGE data using a GLM:
-    #   first, fit genewise GLMs
-    gfit <- glmFit(dge, design)
+	
+	### Let us test for differential expression with the DGE data
+	# 
+	# 1. EDGER Classical Approach: Negative Bionomial Linear Models
+    # ==============================================================
+	# First, fit genewise NB GLMs and compute the coefficients for
+	# the different levels of our design column.
+    cat("\n\tComputing Model Coefficients\n\n")
+	gfit <- glmFit(dge, design)
     if (VERBOSE) {
-        print(names(gfit))
+        #print(names(gfit))
         print(head(coef(gfit)))
     }
     
-    # We can now conduct Likelihood Rato tests and show the top genes
+    # We now conduct Likelihood Ratio tests and show the top genes
     # for the selected comparison coefficients (reference vs. coeff)
-    lrt <- glmLRT(gfit, coef=1)	# coef = 1... length(gfit$coefficients)
-    print(topTags(lrt))
-    # the problem here us that we are limited to comparisons defined by
+    cat("\n\tPerforming Likelihood Ratio Tests\n\n")
+    for (i in 1:ncol(gfit)){
+		lrt <- glmLRT(gfit, coef = i)	# coef = 1... length(gfit$coefficients)
+    	print(topTags(lrt))
+		cat("\n")
+    }
+	# the problem here us that we are limited to comparisons defined by
     # the fitting coefficients (ref vs. variable-in-coeff).
     # If we want more control we need to use makeContrasts()
     # This is due to the formula used:  ~ table[ , design.column ]
     # If we used ~ 0 + table[ , design.column] we would have diffs for
     # all levels, but no reference.
+    
+	# We can perform a similar analysis to glmFit, but also estimating
+	# genewise QuasiLikelihood (QL) dispersion values. Likelihood Ratio
+	# Test (LRT) are replaced by Bayes Quasilikelihood F-Tests.
+	cat("\n\tPerforming Quasi-likelihood F-Tests\n\n")
+	qfit <- glmQLFit(dge, design)
+    if (VERBOSE) {
+        #print(names(gfit))
+        print(head(coef(qfit)))
+    }
+    
+    # We now conduct Likelihood Ratio tests and show the top genes
+    # for the selected comparison coefficients (reference vs. coeff)
+    for (i in 1:ncol(qfit)){
+		qlt <- glmQLFTest(qfit, coef = i)	# coef = 1... length(gfit$coefficients)
+    	print(topTags(qlt))
+		cat("\n")
+    }
 
-    # so, for now, let's do a VOOM analysis with the formula employed
-    # in the current design
-
-    #voom transform the data 
-    v <- voom(dge, design, plot=FALSE)
+	
+	
+	# 2. Limma - Voom Approach: Negative Bionomial Linear Models
+    # ==============================================================
+	# First, estimate Mean - Variance relationship if the count data. Use trend
+	# to assign wheights to each observation, adjusting for heteroscedasticity.
+    #
+    cat("\n\tComputing Mean - Variance Trend\n\n")
+    v <- voom(dge, design, plot = FALSE)
     out.png <- paste(folder, '/edgeR/img/edgeR_voom.png', sep='')
     as.png( {
             par(mfrow= c(1,1))
-            voom(dge, design, plot=TRUE)
+            voom(dge, design, plot = TRUE)
         }, out.png )
 
-
-
-    # Carry on a summary variation analysis using the VOOM transformed data
-    #
-    # we fit the results of the voom depending on the model we created with our
-    # design, we overwrite the fit with the use of eBayes (stat model), and
-    # depending on that we decide abut which tests fit the best and summarise the
-    # results: topTable gives us helpful information about everything
-
+    # Carry on a differential expression analysis using the VOOM transformed data
+    #	
+	# With Limma, we use the weighted data and the design matrix to fit
+	# gewewise linear models and compute the coefficients.
+    cat("\n\tFitting Weighted Linear Models\n\n")
     fit <- lmFit(v, design)
-    fit <- eBayes(fit)
-    results <- decideTests(fit)
-    if (VERBOSE) print(summary(results))
-    #topTable(fit, coef= 1, sort.by='p')
+	if (VERBOSE) cat('Coefficients:\n') ; print(head(fit$coefficients))
 
-    eR.save.top(fit, folder, n.genes, sort.by=c('p', 'B', 'logFC', 'AveExpr'))
+    # EBayes uses empirical Bayes to squeze genewise dispersion towards
+	# the global trend. Then, computes moderated t-statistics and
+	# moderate F-statistics to test differential expression
+	cat("\n\tComputing Empirical Bayes Statistics\n\n")
+	fit <- eBayes(fit)
+
+	# Next, the results of the different testing strategies are contrasted
+	# to determina differentially expressed genes.
+	results <- decideTests(fit)
+    if (VERBOSE) {
+		print(summary(results))
+    	for (i in 1:ncol(fit)){
+			cat("\n\n", colnames(fit)[i], ":\n")
+			print(topTable(fit, coef = i, sort.by='p'))
+		}
+    }
+
+    eR.save.top(fit, folder, n.genes, sort.by = c('p', 'B', 'logFC', 'AveExpr'))
 
     # the problem here is that we are limited to the comparisons defined by
     # coefficents, if we want more control we need to use makeContrasts
@@ -1795,11 +1841,11 @@ eR.dge.voom.variation.analysis <- function(dge, design.column, folder)
 
 }
 
-eR.fit.annotate.ensembl.biomart.save <- function(fit,
+eR.fit.annotate.save <- function(fit,
                             ens.db,
-                            bm.annot.1,
+                            biomart.ann,
                             folder,
-                            n.genes=1000	# top N genes to save in tables
+                            n.genes = 1000	# top N genes to save in tables
                             )
 {
     #---------------------------------------------------------------------------
@@ -1809,20 +1855,20 @@ eR.fit.annotate.ensembl.biomart.save <- function(fit,
     #genes and transcriptomes (non-characterized genes) from the organism
     #of interest
 
-    # we created two different databases one from the gtf file (small archive)
-    # and one from the data we extracted from ENSEMBL and stored it in a sqlite 
-    # file
-
-    # we'll use ens.db
-    if (str_sub(rownames(fit, 1,3) == 'ENS'))
-        by <- 'GENEID'
-    else
-        by <- 'ENTREZID'
-
-    # once we have prepared the database, we now want to extract the annotation 
-    # for the genes in 'fit' to add useful information to our genes
+    # First we need to identify wether the gene identifiers used for
+	# differential analysis correspond to GENEID or GENENAME fields in
+	# Ensembl notation. 
+	
+	if (all(str_sub(rownames(fit), 1, 3) == "ENS")){
+        by='GENEID'
+    }else{
+    	by='GENENAME'}
+		   
+    # Once we have prepared the database and identified the Key type
+	# we extract the annotation for the genes in our Differentially
+	# Expressed gene list ('fit').
     ens.ann <- ensembldb::select(ens.db, 
-                      column=by, keytype=by, keys=rownames(fit), 
+                      column = by, keytype = by, keys = rownames(fit), 
                       columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION', 
                                  'GENENAME', 'GENEID', 'ENTREZID',
                                  'TXID', 'TXBIOTYPE',
@@ -1841,19 +1887,19 @@ eR.fit.annotate.ensembl.biomart.save <- function(fit,
     # SAVE ANNOTATION
     # ---------------
     # this is all the annotation for all the genes in 'fit'
-    write.table(ens.ann, file=paste(folder, '/ensembl.annotation.txt', sep=''), 
+    write.table(ens.ann, file=paste(folder, '/annotation/ensembl.annotation.txt', sep=''), 
 	    sep='\t', row.names=T, col.names=T)
 
     # check if the amount of genes we have is the same as the number of 
     # the annotations that we have extracted
-    if ( ! table(ens.ann$GENEID==rownames(fit)) ) {
-        cat("Annotation does not match genes\n")
-        cat("Using only one entry per gene\n")
+    if ( ! length(ens.ann[, by])==length(rownames(fit)) ) {
+        cat("\nNumber of annotations does not match gene number")
+        cat("\nUsing only one entry per gene\n")
         ens.ann.1 <- ens.ann[ ! duplicated(ens.ann$GENEID), ]
     } else {
         ens.ann.1 <- ens.ann
     }
-    write.table(ens.ann.1, file=paste(folder, '/ensembl.annotation.1st.txt', sep=''), 
+    write.table(ens.ann.1, file=paste(folder, '/annotation/ensembl.annotation.1st.txt', sep=''), 
 	    sep='\t', row.names=T, col.names=T)
 
 
@@ -1864,28 +1910,28 @@ eR.fit.annotate.ensembl.biomart.save <- function(fit,
     # of this list.
     #
     #	This checks that genes and annotation go in the same order)
-    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1$GENEID), ]
+    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[, by]), ]
 
     
     # and now we will also add to 'fit$genes' the biomaRt annotation
-    fit$genes <- merge(fit$genes, bm.annot.1, by.x="GENEID", by.y="ensembl_gene_id")
+    fit$genes <- merge(fit$genes, bm.annot.1, by.x = "GENEID", by.y = "ensembl_gene_id")
     if (VERBOSE) print(head(fit$genes))
 
     # SAVE THE FULL ANNOTATED FIT
     # ---------------------------
     # save all the contents of 'fit' in an RDS file
-    saveRDS(fit, file=paste(folder, '/edgeR/annotatedVOOMfit.rds', sep=''))
+    saveRDS(fit, file = paste(folder, '/edgeR/annotatedVOOMfit.rds', sep=''))
     #	'fit' can later be recovered with: 
     #		fit <- readRDS(file=paste(folder, '/annotatedVOOMfit.rds', sep=''))
     # and save as well as Rdata file
-    save(fit, file=paste(folder, '/edgeR/annotatedVOOMfit.RData', sep=''))
+    save(fit, file = paste(folder, '/edgeR/annotatedVOOMfit.RData', sep=''))
     #	'fit' can later be recovered with: 
     #		fc <- load(file=paste(folder, '/annotatedVOOMfit.RData', sep=''))
 
 
     # save top annotated genes
     eR.save.top.annotated(fit, folder, n.genes, 
-                          sort.by=c('p', 'logFC', 'AveExpr'))
+                          sort.by = c('p', 'logFC', 'AveExpr'))
     
 
     return(fit)
@@ -1894,18 +1940,19 @@ eR.fit.annotate.ensembl.biomart.save <- function(fit,
 
 
 eR.fit.treat <- function(fit,
-                         threshold=1,
+                         threshold = 1,
                          folder,
-                         verbose=T)
+                         verbose = T )
 {
-    #Testing relative to a threshold: 1 means a 2x fold change
-    fit.thres <- treat(fit, lfc=threshold)
-    if (verbose) {
+    # Similar to Empitical Bayes but Testing relative to a LFC threshold.
+	# LFC = 1 means a 2x fold change. This is more strict than eBayes.
+    fit.thres <- treat(fit, lfc = threshold)
+    if (VERBOSE) {
         res.thres <- decideTests(fit.thres)
         print(summary(res.thres))
     }
     if (VERBOSE)
-        print(topTreat(fit.thres, coef=1, sort.by='p'))
+        print(topTreat(fit.thres, coef = 1, sort.by='p'))
     
     # save topTreat data
     eR.save.top.treat.ann(fit.thres, folder, n.genes, 
@@ -1913,7 +1960,7 @@ eR.fit.treat <- function(fit,
 
     # also save fitted to a threshold as tables
     eR.save.top.ann.thresh(fit.thres, folder, n.genes, 
-                           sort.by=c('p', 'B', 'logFC', 'AveExpr'))
+                           sort.by=c('p', 'logFC', 'AveExpr'))
     
     return(fit.thres)
 }
@@ -1921,25 +1968,27 @@ eR.fit.treat <- function(fit,
 eR.dge.all.comparisons <- function(dge, 
                                design.column,
                                ens.db,
-                               biomart,
+                               biomart.ann,
                                folder)
 {
+	cat("\n\tPerforming all pairwise comparisons by:", toupper(design.column), "\n")
+    # --------------------------------------------------------------------------------
+    # Do all possible pairwise comparisons.
+	# We need to define a new design without intercept, since we do not want to
+	# fix a reference level.
 
-    # ---------------------------------------------------------------------
-    # Do all comparisons at once
-
-    # for Coturnix we use 'viral.dose' as basis for comparison
-    #design.column <- 'viral.dose'
-    # for Gallus we will use 'Src'
-    design <- model.matrix(~0 + target[ , design.column])
-    colnames(design) <- levels(as.factor(target[ , design.column]))
-    grps <- levels(as.factor(target[ , design.column]))
-    colnames(design) <- grps
+    design <- model.matrix(~0 + dge$sample$group)
+    grps <- levels(as.factor(dge$sample$group))
+	colnames(design) <- grps
     n.grps <- length(grps)
-
-    qlfit <- glmQLFit(dge, design, robust=TRUE, abundance.trend=TRUE)
-    png.file <- paste(folder, '/edgeR/img/edgeR_QLFit_', design.column, '.png', sep='')
-    as.png(plotQLDisp(qlfit), png.file)
+	if (VERBOSE) cat("\nGroups:", grps, "\n")
+	
+	## Fit new genewise multiple linear models with quasilikelihood varianc
+	## estimation.
+	cat("\n\tComputing Quasi-Likelihood Dispersion\n\n")
+    qlfit <- glmQLFit(dge, design, robust = TRUE, abundance.trend = TRUE)
+    out.png <- paste(folder, '/edgeR/img/edgeR_QLFit_', design.column, '.png', sep='')
+    as.png(plotQLDisp(qlfit), out.png)
 
     # if we wanted to apply a log-fold-change theshold, we could do
     # the calculations using qlfit here before testing for contrasts 
@@ -1954,11 +2003,11 @@ eR.dge.all.comparisons <- function(dge,
         for (j in grps) {
             if (i == j) next	# ignore self-comparisons
             formula <- paste(i, '-', j)
-            cat("\nComputing DGE:", i, '-', j, '\n')
-            cmp <- makeContrasts(formula, levels=design)
+            cat("\n\n\tComputing DGE:", i, '-', j, '\n\n')
+            cmp <- makeContrasts(formula, levels = design)
             # glmQLFTest is similar to glmLRT except it uses Bayes quasi-likelihood
             # the P-values are always >= those produced by glmLRT
-            qlf.cmp <- glmQLFTest(qlfit, contrast=cmp)
+            qlf.cmp <- glmQLFTest(qlfit, contrast = cmp)
             # or if a threshold has been defined
             #qlf.cmp <- glmTreat(glfit, contrast=cmp, lfc=threshold)
 
@@ -1981,7 +2030,7 @@ eR.dge.all.comparisons <- function(dge,
             
             # ANNOTATE the results without saving them
             ### NOTE consider using eR.fit.annotate.ensembl.biomart
-            qlf.cmp <- eR.fit.annotate(qlf.cmp, ens.db, biomart)
+            qlf.cmp <- eR.fit.annotate(qlf.cmp, ens.db, biomart.ann)
 
             name <- paste(folder, '/edgeR/fit_', design.column, '_', i, '_-_', j, '_annot', sep='')
             # qlf.cmp is a list of tables, if we want to save it,
@@ -1993,7 +2042,7 @@ eR.dge.all.comparisons <- function(dge,
             # we'll save all (<=100.000) significant genes
 
             name <- paste(folder, '/edgeR/comp_', design.column, '_', i, '_-_', j, '_annot', sep='')
-	    # qlf.cmp$table is a table with logFC, logCPM, F and PValue
+	    	# qlf.cmp$table is a table with logFC, logCPM, F and PValue
             # that is what weill be saved when using topTags and write.table
             # will add "_top_" n "_by_" sort.by
             # defaults: n.genes=500, sort.by='PValue', p.value=0.01
@@ -2014,8 +2063,8 @@ eR.dge.all.comparisons <- function(dge,
 
             qlf.result <- list(
 	                      eR.cmp=qlf.cmp
-                              #, eR.go=eR.go
-			      #, eR.kegg=eR.kegg
+                          #, eR.go=eR.go
+			      		#, eR.kegg=eR.kegg
 			      )
             eR.data[[formula]] <- qlf.result 
             #print(topTags(qlf.cmp))
@@ -2031,24 +2080,20 @@ eR.dge.all.comparisons <- function(dge,
 
 
 
-ds2.get.annotation.ens.org <- function(fit, ens.db, org.db)
+ds2.annotate.results <- function(dds, ens.db, org.db)
 {
-    if (sub_str(rownames(fit), 1, 3) == 'ENS')
+    if (all(str_sub(rownames(dds), 1, 3) == "ENS")){
+        by='GENEID'
+    }else{
+    	by='GENENAME'}
 
     # annotate with ensembl ens.db
-    ens.ann <- ensembldb::select(ens.db, 
-                      column='GENID', keytype= 'GENEID', keys=rownames(fit), 
-                      columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION', # no longer available
-                                 'GENENAME', 'GENEID', 'ENTREZID', # empty
-                                 'TXID', 'TXBIOTYPE', # these make the call fail
-                                 'PROTEINID', 'UNIPROTID' # no longer available
-                                ))
 
-    ann <- ensembldb::select(ens.db, 
-                  keytype= 'GENEID', keys=rownames(fit), 
+    ens.ann <- ensembldb::select(ens.db, 
+                  keytype= by, keys=rownames(dds), 
                   columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION',
                              'GENENAME', 'GENEID', 'ENTREZID', 
-                              'TXNAME', 'TXBIOTYPE', 
+                              'TXNAME', 'TXID', 'TXBIOTYPE', 
                               'PROTEINID', 'UNIPROTID'))
 
     ens.ann.1 <- ens.ann[ ! duplicated(ens.ann$GENEID), ]
@@ -2064,22 +2109,17 @@ ds2.get.annotation.ens.org <- function(fit, ens.db, org.db)
 
         # and now we should be able to use the Org package if we successfully built it
         # at the beginning.
-        geneSymbols <- mapIds(org.db, 
-                              keys=as.character(dfwt_vs_0.1$genes$ENTREZID), 
-                              column="ENTREZID", 
-                              keytype="ENTREZID", 
-                              multiVals="first")
-
+        geneSymbols <- ens.ann$ENTREZID
 
         # retrieve go ids
-        go.ann <- AnnotationDbi::select(org.Ggallus.eg.db, 
-	        keys=as.character(dfwt_vs_0.1$genes$ENTREZID), 
+        go.ann <- AnnotationDbi::select(org.db, 
+	        	keys = as.character(ens.ann$ENTREZID),
                 columns=c("ENTREZID", "GO", "GOALL", "ONTOLOGY","ONTOLOGYALL"), 
-                keytype="GID", 
+                keytype="ENTREZID", 
                 multiVals="CharacterList")
 
         # retrieve corresponding descriptions
-        GOdescription <- AnnotationDbi::select(GO.db, keys=go.ann$GO, 
+        GOdescription <- AnnotationDbi::select(GO.db, keys = go.ann$GO, 
                          columns= c("GOID", "TERM", "DEFINITION", "ONTOLOGY"), 
                          keytype= "GOID")
 
@@ -2314,30 +2354,30 @@ ds2.dds.plot.and.save <- function(dds,
 }
 
 
-
-ds2.interactively.print.n.most.significant.de.genes <- function(ds.data, n=10) 
+ds2.interactively.print.n.most.significant.de.genes <- function(dds.results, n=10) 
 {
     continue.on.enter("You may want to maximize your terminal before continuing ")
 
-    options(width=200)
+    options(width = 200)
     n <- 10
-    for (i in names(ds.data)) {
-        cat("\nMost significant', n, 'genes for", i, '\n')
-        print(head(ds.data[[i]]$signif.annot[ , c("log2FoldChange", "entrezgene_description")] ), n)
+    for (i in names(dds.results)) {
+        cat("\n\n\tMost significant", n, "genes for", i, "\n\n")
+        print(head(dds.results[[i]]$signif[ , c("log2FoldChange", "entrezgene_description")] ), n)
         continue.on.enter("Press [ENTER] to continue ")
     }
-    options(width=80)
+    options(width = 80)
     continue.on.enter("Done, you can restore your terminal now ")
 }
 
+
 ds2.interactively.plot.top.up.down.regulated.gene <- function(dds,
-                                                              ds.data, 
+                                                              dds.results, 
                                                               design.column)
 {
     # Plot counts of the gene with maximal l2FC (up or down)
     threshold <- 0
-    for (n in names(ds.data)) {
-        res <- ds.data[[n]]$signif.annot
+    for (n in names(dds.results)) {
+        res <- dds.results[[n]]$signif
         up <- res[ res$log2FoldChange > threshold, ]	# up regulated
         down <- res[ res$log2FoldChange < -threshold, ]	# down regulated
 
@@ -2659,7 +2699,7 @@ ds2.analyze.pfam.representation <- function(ds.data, bm.fam.annot, folder)
 
 
 GO_fgsea <- function (ann.shrunk.lfc, 
-		      max.size=250,
+		      		max.size=250,
                       out.dir=paste(folder, 'go_fgsea', sep='/'), 
                       out.name='GO_fgsea',
                       use.description=TRUE,
@@ -2823,12 +2863,12 @@ GO_fgsea <- function (ann.shrunk.lfc,
 
 
 GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc, 
-		      max.size=250,
+		     		 max.size=250,
                       out.dir=paste(folder, 'go_cProf', sep='/'), 
                       out.name='GO_cProf',
                       use.description=TRUE,
-                      OrgDb = org.Cjaponica.eg.db,
-                      kegg_organism = "cjo",	# (cjo = coturnix japonica)
+                      OrgDb,
+                      kegg_organism = NULL,			# (cjo = coturnix japonica)
                                              # (gga = gallus gallus)
                       top.n=10,
                       top.biblio=5,
@@ -2973,143 +3013,146 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
     
     ### K E G G annotation
     # let's try with KEGG (from the ENTREZID which is the same a ncbi-genid)
+    if (! is.null(kegg_organism)){
+    	
+		if (VERBOSE) cat("Doing KEGG GSEA with ClusterProfiler\n")
+    	kse.out.file <- paste(out.dir, '/', out.name, '.topKEGG.tab', sep='')
+    	
+		if (! file.exists(kse.out.file)) {
+        	kse <- gseKEGG(geneList     = s.ranks,
+                	   organism     = kegg_organism,
+                	   #nPerm        = 10000,
+                	   minGSSize    = 3,
+                	   maxGSSize    = max.size,
+                	   pvalueCutoff = 0.05,
+                	   pAdjustMethod = "fdr",
+                	   keyType       = "ncbi-geneid",
+                	   nPermSimple = 100000)
+
+        	if (dim(kse)[1] == 0) {
+            	# Try without correction issuing a warning
+            	kse <- gseKEGG(geneList     = s.ranks,
+                    	   organism     = kegg_organism,
+                    	   #nPerm        = 10000,
+                    	   minGSSize    = 3,
+                    	   maxGSSize    = max.size,
+                    	   pvalueCutoff = 0.05,
+                    	   pAdjustMethod = "none",
+                    	   keyType       = "ncbi-geneid",
+                    	   nPermSimple = 100000)
+            	out.name <- paste(out.name, 'raw_p', sep='')
+        	}
+        	if (dim(kse)[1] > 1) {
+            	saveRDS(kse, file=kse.out.file)
+            	kse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
+            	# save also as text for user access
+            	write.table(kse, file=kse.tab.file, row.names=T, col.names=T, sep='\t')
+        	}
+    	} else {
+        	if (file.exists(kse.out.file)) {
+            	# default is adjusted p
+            	kse <- readRDS(kse.out.file)
+        	} else {
+            	# try raw p
+            	out.name <- paste(out.name, '.raw_p', sep='')
+            	kse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
+            	if (file.exists(kse.out.file)) {
+                	kse <- readRDS(kse.out.file)
+            	} else {
+                	# use an empty table so next check can be done
+                	kse <- table(c())
+            	}
+        	}
+    	}
     
-    if (VERBOSE) cat("Doing KEGG GSEA with ClusterProfiler\n")
-    kse.out.file <- paste(out.dir, '/', out.name, '.topKEGG.tab', sep='')
-    if (! file.exists(kse.out.file)) {
-        kse <- gseKEGG(geneList     = s.ranks,
-                   organism     = kegg_organism,
-                   #nPerm        = 10000,
-                   minGSSize    = 3,
-                   maxGSSize    = max.size,
-                   pvalueCutoff = 0.05,
-                   pAdjustMethod = "fdr",
-                   keyType       = "ncbi-geneid",
-                   nPermSimple = 100000)
+	
+    	# if dim(kse)[1] == 0 then we won't save anything
+    	#	hopefully, if re-run again it might work next time by chance
+    	# else
+    	if (dim(kse)[1] > 0) {
+        	if (VERBOSE) cat("Plotting KEGG GSEA with ClusterProfiler\n")
+        	# <p>A <strong>Dotplot</strong>: For each group shows if it is up or down 
+        	# regulated and to which extent. The circle size is proportional to the
+        	# size (the number of genes contained) of the group, and the color to the
+        	# p-value.</p>
+        	out.png <- paste(out.dir, '/', out.name, '.KEGGdotplot.png', sep='')
+        	as.png( 
+            	dotplot(kse, showCategory = 10, title = "Enriched Pathways" , 
+                    	split=".sign") + facet_grid(.~.sign)
+            	, out.png)
 
-        if (dim(kse)[1] == 0) {
-            # Try without correction issuing a warning
-            kse <- gseKEGG(geneList     = s.ranks,
-                       organism     = kegg_organism,
-                       #nPerm        = 10000,
-                       minGSSize    = 3,
-                       maxGSSize    = max.size,
-                       pvalueCutoff = 0.05,
-                       pAdjustMethod = "none",
-                       keyType       = "ncbi-geneid",
-                       nPermSimple = 100000)
-            out.name <- paste(out.name, 'raw_p', sep='')
-        }
-        if (dim(kse)[1] > 1) {
-            saveRDS(kse, file=kse.out.file)
-            kse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
-            # save also as text for user access
-            write.table(kse, file=kse.tab.file, row.names=T, col.names=T, sep='\t')
-        }
-    } else {
-        if (file.exists(kse.out.file)) {
-            # default is adjusted p
-            kse <- readRDS(kse.out.file)
-        } else {
-            # try raw p
-            out.name <- paste(out.name, '.raw_p', sep='')
-            kse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-            if (file.exists(kse.out.file)) {
-                kse <- readRDS(kse.out.file)
-            } else {
-                # use an empty table so next check can be done
-                kse <- table(c())
-            }
-        }
-    }
-    
-    # if dim(kse)[1] == 0 then we won't save anything
-    #	hopefully, if re-run again it might work next time by chance
-    # else
-    if (dim(kse)[1] > 0) {
-        if (VERBOSE) cat("Plotting KEGG GSEA with ClusterProfiler\n")
-        # <p>A <strong>Dotplot</strong>: For each group shows if it is up or down 
-        # regulated and to which extent. The circle size is proportional to the
-        # size (the number of genes contained) of the group, and the color to the
-        # p-value.</p>
-        out.png <- paste(out.dir, '/', out.name, '.KEGGdotplot.png', sep='')
-        as.png( 
-            dotplot(kse, showCategory = 10, title = "Enriched Pathways" , 
-                    split=".sign") + facet_grid(.~.sign)
-            , out.png)
-
-        # <p>B <strong>Enrichment map</strong>: organizes terms in a network with edges 
-        # connecting overlapping gene sets (i.e. shows which gene sets contain common
-        # genes). Dot diameter represents the size of the gene set (the number of genes
-        # it contains) and color represents the adjusted probability.</p>
-        out.png <- paste(out.dir, '/', out.name, '.KEGGemmaplot.png', sep='')
-        as.png(
-            emapplot(pairwise_termsim(kse))
-            , out.png)
+        	# <p>B <strong>Enrichment map</strong>: organizes terms in a network with edges 
+        	# connecting overlapping gene sets (i.e. shows which gene sets contain common
+        	# genes). Dot diameter represents the size of the gene set (the number of genes
+        	# it contains) and color represents the adjusted probability.</p>
+        	out.png <- paste(out.dir, '/', out.name, '.KEGGemmaplot.png', sep='')
+        	as.png(
+            	emapplot(pairwise_termsim(kse))
+            	, out.png)
 
 
-        # <p>D <strong>Category Netplot</strong>: shows the
-        # linkage between genes and biological concepts as a network (helpful to see
-        # which genes are involved in enriched pathways and genes that may belong to
-        # multiple annotation categories).</p>
-        # categorySize can be either 'pvalue' or 'geneNum'
-        out.png <- paste(out.dir, '/', out.name, '.KEGGcnetplot.png', sep='')
-        as.png(
-            cnetplot(kse, categorySize="pvalue", foldChange=s.ranks)
-            , out.png)
+        	# <p>D <strong>Category Netplot</strong>: shows the
+        	# linkage between genes and biological concepts as a network (helpful to see
+        	# which genes are involved in enriched pathways and genes that may belong to
+        	# multiple annotation categories).</p>
+        	# categorySize can be either 'pvalue' or 'geneNum'
+        	out.png <- paste(out.dir, '/', out.name, '.KEGGcnetplot.png', sep='')
+        	as.png(
+            	cnetplot(kse, categorySize="pvalue", foldChange=s.ranks)
+            	, out.png)
 
-        # <p>C <strong>Ridgeplot</strong>: density plots grouped by gene set depicting
-        # the frequency of fold change values per gene within each set. Helps 
-        # interpret up/down-regulated pathways.</p>
-        out.png <- paste(out.dir, '/', out.name, '.KEGGridgeplot.png', sep='')
-        as.png(
-            ridgeplot(kse) + labs(x = "enrichment distribution")
-            , out.png)
+        	# <p>C <strong>Ridgeplot</strong>: density plots grouped by gene set depicting
+        	# the frequency of fold change values per gene within each set. Helps 
+        	# interpret up/down-regulated pathways.</p>
+        	out.png <- paste(out.dir, '/', out.name, '.KEGGridgeplot.png', sep='')
+        	as.png(
+            	ridgeplot(kse) + labs(x = "enrichment distribution")
+            	, out.png)
 
-        # PubMed trend of enriched terms
-        # 
-        # Plots the number/proportion of publications trend based on the query result
-        # from PubMed Central.
-        out.png <- paste(out.dir, '/', out.name, '.KEGGpmcplot.png', sep='')
-        cur.year <- as.integer(format(Sys.Date(), "%Y"))
-	    as.png(
-            pmcplot(kse$description[1:5], (cur.year-10):(cur.year-1), proportion=FALSE)
-            , out.png)
+        	# PubMed trend of enriched terms
+        	# 
+        	# Plots the number/proportion of publications trend based on the query result
+        	# from PubMed Central.
+        	out.png <- paste(out.dir, '/', out.name, '.KEGGpmcplot.png', sep='')
+        	cur.year <- as.integer(format(Sys.Date(), "%Y"))
+	    	as.png(
+            	pmcplot(kse$description[1:5], (cur.year-10):(cur.year-1), proportion=FALSE)
+            	, out.png)
 
-        cur.dir <- getwd()
-        for (i in 1:dim(kse)[1]) {
-            # for each of the pathways in kse
-            # Use the `Gene Set` param for the index in the title, and as the value for geneSetId
-            
-            # GSEA plot 
-            # Plot of the Running Enrichment Score (green
-            # line) for a gene set as the analysis walks down the ranked 
-            # gene list, including the location of the maximum enrichment 
-            # score (the red line). The black lines in the Running Enrichment 
-            # Score show where the members of the gene set appear in the 
-            # ranked list of genes, indicating the leading edge subset.
-            #
-            # The Ranked list metric shows the value of
-            #  the ranking metric (log2 fold change) as you move down the 
-            # list of ranked genes. The ranking metric measures a gene’s 
-            # correlation with a phenotype.
-            out.png <- paste(out.dir, '/', 
-                out.name, '.KEGGgseaplot.', i, '.', kse$ID[i], '.png', sep='')
-            as.png(
-              gseaplot(kse, by = "all", title = kse$Description[i], geneSetID = i)
-              , out.png)
-            
-            # **Pathview**
-            # This will create a PNG and a __different__ PDF of the enriched 
-            # KEGG pathway in the current working directory.
-            setwd(out.dir)	# change to the appropriate directory
-            # Produce the native KEGG plot (PNG)
-            dme <- pathview(gene.data=s.ranks, pathway.id=kse$ID[i], species = kegg_organism)
+        	cur.dir <- getwd()
+        	for (i in 1:dim(kse)[1]) {
+            	# for each of the pathways in kse
+            	# Use the `Gene Set` param for the index in the title, and as the value for geneSetId
 
-            # Produce a different plot (PDF) (different from the previous one)
-            dme <- pathview(gene.data=s.ranks, pathway.id=kse$ID[i], species = kegg_organism, kegg.native = F)
-            setwd(cur.dir) # and back
-        }
-    }
+            	# GSEA plot 
+            	# Plot of the Running Enrichment Score (green
+            	# line) for a gene set as the analysis walks down the ranked 
+            	# gene list, including the location of the maximum enrichment 
+            	# score (the red line). The black lines in the Running Enrichment 
+            	# Score show where the members of the gene set appear in the 
+            	# ranked list of genes, indicating the leading edge subset.
+            	#
+            	# The Ranked list metric shows the value of
+            	#  the ranking metric (log2 fold change) as you move down the 
+            	# list of ranked genes. The ranking metric measures a gene’s 
+            	# correlation with a phenotype.
+            	out.png <- paste(out.dir, '/', 
+                	out.name, '.KEGGgseaplot.', i, '.', kse$ID[i], '.png', sep='')
+            	as.png(
+            	  gseaplot(kse, by = "all", title = kse$Description[i], geneSetID = i)
+            	  , out.png)
+
+            	# **Pathview**
+            	# This will create a PNG and a __different__ PDF of the enriched 
+            	# KEGG pathway in the current working directory.
+            	setwd(out.dir)	# change to the appropriate directory
+            	# Produce the native KEGG plot (PNG)
+            	dme <- pathview(gene.data=s.ranks, pathway.id=kse$ID[i], species = kegg_organism)
+
+            	# Produce a different plot (PDF) (different from the previous one)
+            	dme <- pathview(gene.data=s.ranks, pathway.id=kse$ID[i], species = kegg_organism, kegg.native = F)
+            	setwd(cur.dir) # and back
+        	}
+    	}
+	}
 }
-

@@ -23,7 +23,7 @@
 #
 build.offline.annotation <- function(
                                      folder,
-                                     db.dir='EnsDb.Ggallus.v106',
+                                     db.dir,
                                      target.organism,
                                      reference.gtf,
                                      release,
@@ -470,5 +470,313 @@ biomart.merge.annotations <- function(ann, by="ensembl_gene_id") {
 	        header=T, sep='\t')
     }
     return(bm.annot)
+}
+
+
+
+prepare.Ensembl.Db <- function(	target.organism,
+								annotation.dir,
+								use.online.annotation = TRUE,
+								annotation,
+								ensembl.version){
+
+	    ############################################
+	    ## USE ONLINE ENSEMBL ANNOTATION DATABASE ##
+	    ############################################
+	    
+	# SELECT ENSEMBL ANNOTATION DATABASE AVAILABLE ON-LINE
+    if (use.online.annotation == TRUE) {
+		
+		cat("\n							\n")
+		cat("\tFETCHING ENSEMBL DATABASE\n")
+	    cat("\t=========================\n")
+
+		# Create output directory
+		net.ens.out <- paste(annotation.dir, 'net.ens.Db', sep = '/')
+	    dir.create(net.ens.out, showWarnings=FALSE)
+
+	    #if ( ! file.exists(paste(net.ens.out, 'net.ens.db.rds', sep='/')) ) {
+
+		# Get ENSEMBL annotations for our target
+            ah <- AnnotationHub()
+            qr <- query(ah, c("EnsDb", target.organism))
+
+		# Choose the most recent (last) one: AH98040 Ensembl Db version 105
+		last.ref <- tail(names(qr), n = 1)
+		net.ens.db <- qr[[last.ref]]
+
+		# Save online ensemble annotation
+		saveRDS(net.ens.db, file=paste(net.ens.out, 'net.ens.db.rds', sep='/'))
+		save(net.ens.db, file=paste(net.ens.out, 'net.ens.db.RData', sep='/'))
+
+
+        ## ERROR LOADING:
+        ## Extarnal pointer is not valid. ¿Can online DBs be saved as objects? 
+        #} else {
+	    #
+        #    net.ens.db <- readRDS(file=paste(net.ens.out, 'net.ens.db.rds', sep='/'))
+        #}
+
+	    # Check it
+	    print(net.ens.db)
+	    columns(net.ens.db)
+	    #head(keys(net.ens.db, 'GENEID'))
+
+	    return(net.ens.db)
+    }
+
+
+	    #######################################
+	    ## BUILD ENSEMBL ANNOTATION DATABASE ##
+	    #######################################
+
+    ### BUILD DATABASE FROM GTF/GFF,
+
+    if (use.online.annotation == FALSE) {
+		
+		cat("\n							\n")
+		cat("\tBUILDING ENSEMBL DATABASE\n")
+	    cat("\t=========================\n")
+
+	    # Load required packages
+        source(system.file("scripts/generate-EnsDBs.R", package = "ensembldb"))
+
+        # Use our local GTF file to generate ENSEMBL Database
+	    gtf <- paste(sub('\\.g(f|t)f$', '', annotation), 'gtf', sep='.')
+	    gff <- paste(sub('\\.g(f|t)f$', '', annotation), 'gff', sep='.')
+	    ref.base <- sub('\\.g(f|t)f$', '', basename(annotation))
+
+	    # Create output directory	
+        ens.pkg.out <- paste(annotation.dir, 'ens.pkg.Db', sep='/')
+	    dir.create(ens.pkg.out, showWarnings = FALSE)
+
+	    ##############
+	    ##	ADRIAN  ##
+	    ##############
+
+	    # WARNING MESSAGES:
+	    # I'm missing column(s): 'gene_name','entrezid'. The corresponding database column(s) will be empty!
+	    # No column 'exon_id' present, created artificial exon IDs by concatenating the transcript ID and the exon number.
+	    # Could not determine length for all seqnames.  Unable to retrieve sequence lengths from Ensembl.
+
+	    sqlite <- paste(basename(gtf), 'sqlite', sep = '.')
+	    #sqlite <- paste(target.organism, basename(gtf), ensembl.version, 'sqlite', sep='.')
+	    ens.pkg.db <- paste(ens.pkg.out, sqlite, sep = '/') 
+		
+        if ( ! file.exists(ens.pkg.db) ) {
+
+		    # Generate SQLite database in place from GTF
+		    #gtf.edb <- ensDbFromGtf(gtf=gtf, 
+	        #	    organism=target.organism,
+            #       genomeVersion=basename(gtf),
+            #       version=ensembl.version,
+            #       destDir=ens.pkg.out)			# lacks entrezid
+
+            ensDbFromGtf(	gtf = gtf, 
+        				    organism= target.organism, 
+        				    genomeVersion = basename(gtf),
+        				    version = ensembl.version,
+        				    outfile = ens.pkg.db)
+
+		    # Move the database to the output directory
+            # system(paste("mv", sqlite, ens.pkg.db))	
+
+		    # Generate Ensembl DB Package
+            makeEnsembldbPackage(	ensdb = ens.pkg.db,
+        						    version = ensembl.version, 
+    		             		    maintainer="J. R. Valverde <jrvalverde@cnb.csic.es>", 
+    		             		    author="J. R. Valverde",
+                         		    destDir=ens.pkg.out,
+                         		    license="Artistic-2.0")
+	    }
+
+	    # If building DB from GTF file fails, we may use the GFF3 file (which should contain
+	    # the same information
+
+	    ##############
+	    ##  ADRIAN  ##
+	    ##############
+
+	    # DB FROM GFF DOES NOT WORK. ERROR MESSAGE:
+	    # Required columns/fields gene_id;exon_id;biotype not present in the GFF file!
+
+	    sqlite <- paste(basename(gff), 'sqlite', sep = '.')
+	    #sqlite <- paste(target.organism, basename(gff), ensembl.version, 'sqlite', sep='.')
+	    ens.pkg.db <- paste(ens.pkg.out, sqlite, sep = '/') 
+		
+
+        if ( ! file.exists(ens.pkg.db) ) {
+
+		    #gff.edb <- ensDbFromGff(gff=gff, 
+		    #	organism=target.organism,
+		    #	genomeVersion=basename(gff),
+		    #	version=ensembl.version,
+		    #	destDir=ens.pkg.out)			# lacks entrezid
+
+		    ensDbFromGff(	gff = gff, 
+        				    organism= target.organism, 
+        				    genomeVersion = basename(gff),
+        				    version = ensembl.version,
+        				    outfile = ens.pkg.db)
+
+	    # Move the database to the output directory
+            # system(paste("mv", sqlite, ens.pkg.db))	
+
+	    # Generate Ensembl DB Package
+            makeEnsembldbPackage(	ensdb = ens.pkg.db,
+        		            	version = ensembl.version, 
+    		             	    maintainer="J. R. Valverde <jrvalverde@cnb.csic.es>", 
+    		             	    author="J. R. Valverde",
+                         	    destDir=ens.pkg.out,
+                         	    license="Artistic-2.0")
+
+
+            # Move the database to the output directory
+            system(paste("mv", sqlite, ens.pkg.db))				
+
+            makeEnsembldbPackage(ens.pkg.db, version=ensembl.version, 
+							    maintainer="J. R. Valverde <jrvalverde@cnb.csic.es>", 
+							    author="J. R. Valverde",
+							    destDir=ens.pkg.out, license="Artistic-2.0")
+        }
+		return(ens.pkg.db)
+    }
+}
+ 
+
+	###################################################
+	## EXTRACT GENE ANNOTATION FROM ENSEMBL DATABASE ##
+	###################################################
+	
+# Prepare the annotation of genes we will use.
+
+annotateGenesFromENSEMBL <- function(ensembl.db, gene.ids, save = TRUE, out.dir) {
+	
+	if ( missing(gene.ids) ) {
+		error("Provide either GeneIds OR GeneNames as input")}
+
+	if (all(str_sub(gene.ids, 1, 3) == "ENS")){
+        by='GENEID'
+    }else{
+    	by='GENENAME'}
+
+	# Retrieve Information by GeneName
+	ens.ann <- ensembldb::select(	ensembl.db, 
+				      	keytype= by, keys = as.character(gene.ids), 
+				      	columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION',
+						'GENENAME', 'GENEID', 'ENTREZID', 
+						'TXNAME', 'TXBIOTYPE', 
+						'PROTEINID', 'UNIPROTID'))
+		
+	# Check if the amount of genes we have is the same as the number of 
+	# the annotations that we have extracted
+	if ( length(ens.ann[,by]) != length(gene.ids) ) {
+		cat("Annotation does not match genes\n")
+		cat("Using only one entry per gene\n")
+		ens.ann.1 <- ens.ann[ ! duplicated(ens.ann$GENEID), ]
+
+	} else {
+		ens.ann.1 <- ens.ann
+	}
+
+	if (save == TRUE){
+
+	# SAVE ANNOTATION
+	# ---------------
+		write.table(ens.ann, file = paste(out.dir, 'ensembl.annotation.txt', sep = '/'), 
+					sep = '\t', row.names = T, col.names = T)
+		
+		write.table(ens.ann.1, file = paste(out.dir, 'ensembl.annotation.uniq.txt', sep = '/'), 
+			sep = '\t', row.names = T, col.names = T)
+	}
+	
+	return(ens.ann.1)
+}
+
+	###############################################
+	## EXTRACT GENE ANNOTATION FROM ORG DATABASE ##
+	###############################################
+
+annotateGenesFromORG <- function(org.db, gene.ids, save = TRUE, out.dir) {
+	
+	if ( missing(gene.ids) ) {
+		error("Provide either GeneIds OR GeneNames as input")}
+
+	if (all(str_sub(gene.ids, 1, 3) == "ENS")){
+        by = 'ENSEMBL'
+    } else if (! any(is.na(as.numeric(gene.ids)))){
+    	by = 'ENTREZID'
+	} else {
+		by = 'SYMBOL'}
+
+	# Retrieve Org Package Annotation.
+	# We retrieve annotation in 3 different times and then we merge it.
+	# This way we reduce computing times.
+	org.ann <- AnnotationDbi::select(org.db, 
+				    keys = as.character(gene.ids), 
+				    columns = c("ENTREZID", "GENENAME", "GENETYPE", "SYMBOL",
+								#"ALIAS", "ENZYME", "ACCNUM", "PMID",
+								#"UNIPROT", "PROSITE", "PFAM",
+								"GO", "GOALL","ONTOLOGYALL", "PATH"
+								), 
+				    keytype = by, 
+				    multiVals = "CharacterList")
+					
+	org.ann.2 <- AnnotationDbi::select(org.db, 
+				    keys = as.character(gene.ids), 
+				    columns = c("ENTREZID", #"GENENAME", "GENETYPE", "SYMBOL",
+								"ALIAS", "ENZYME", "ACCNUM", "PMID"
+								#"UNIPROT", "PROSITE", "PFAM",
+								#"GO", "GOALL","ONTOLOGYALL", "PATH"
+								), 
+				    keytype = by, 
+				    multiVals = "CharacterList")
+						
+	org.ann.3 <- AnnotationDbi::select(org.db, 
+				    keys = as.character(gene.ids), 
+				    columns = c("ENTREZID", #"GENENAME", "GENETYPE", "SYMBOL",
+								#"ALIAS", "ENZYME", "ACCNUM", "PMID",
+								"UNIPROT", "PROSITE", "PFAM"
+								#"GO", "GOALL","ONTOLOGYALL", "PATH"
+								), 
+				    keytype = by, 
+				    multiVals = "CharacterList")					
+					
+	for (i in colnames(org.ann.2)){
+		org.ann[i] <- org.ann.2[match(org.ann$ENTREZID, org.ann.2$ENTREZID), i]
+	}
+	for (i in colnames(org.ann.3)){
+		org.ann[i] <- org.ann.3[match(org.ann$ENTREZID, org.ann.3$ENTREZID), i]
+	}
+
+	# Retrieve Gene Ontology descriptions from GO.db Package
+	GO.ann <- AnnotationDbi::select(GO.db,
+					keys = as.character(org.ann$GO), 
+					columns = c(	"GOID", "TERM", "DEFINITION", "ONTOLOGY"),
+					keytype = "GOID")
+	
+	# Merge both datasets by GO ID.
+	GO.ann <- rename(GO.ann, "GO" = "GOID" )
+	
+	for (i in colnames(GO.ann)){
+		org.ann[i] <- GO.ann[match(org.ann$GO, GO.ann$GO), i]
+	}
+	
+	# Check if the amount of genes we have is the same as the number of 
+	# the annotations that we have extracted
+	org.ann.1 <- org.ann[ ! duplicated(org.ann$ENTREZID), ]
+	
+	if (save == TRUE){
+
+	# SAVE ANNOTATION
+	# ---------------
+		write.table(org.ann, file = paste(out.dir, 'orgDb.GO.annotation.txt', sep = '/'), 
+					sep = '\t', row.names = T, col.names = T)
+				
+		write.table(org.ann.1, file = paste(out.dir, 'orgDb.GO.annotation.1st.txt', sep = '/'), 
+			sep = '\t', row.names = T, col.names = T)
+	}
+	
+	return(org.ann.1)
 }
 

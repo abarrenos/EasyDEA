@@ -1163,7 +1163,7 @@ show.data.frame <- function(df,
 #
 as.png <- function(PLOT=NULL, 
                    file='out.png', width=1024, height=1024, 
-                   overwrite=TRUE, VERBOSE = F) {
+                   overwrite=TRUE, VERBOSE = T) {
     if (is.null(file)) {
         tryCatch(print(PLOT))
     } else if ( overwrite || ! file.exists(file) ) {
