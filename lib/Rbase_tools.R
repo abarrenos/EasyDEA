@@ -1162,7 +1162,7 @@ show.data.frame <- function(df,
 #' @export
 #
 as.png <- function(PLOT=NULL, 
-                   file='out.png', width=1024, height=1024, 
+                   file='out.png',# width=1024, height=1024, 
                    overwrite=TRUE, VERBOSE = T) {
     if (is.null(file)) {
         tryCatch(print(PLOT))
@@ -1171,7 +1171,7 @@ as.png <- function(PLOT=NULL,
             cat("as.png(): creating", file, "\n")
         }
 		tryCatch( {
-                png(file, width=width, height=height)
+                png(file)#, width=width, height=height)
                 print(PLOT)
             },
             finally = dev.off()

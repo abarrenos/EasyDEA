@@ -104,6 +104,7 @@ use.package("fpc")
 use.package("NbClust")
 use.package("clusterProfiler")
 use.package("enrichplot")
+use.package("pathview")
 
 use.package("tcltk")
 use.package("gWidgets2")
@@ -290,7 +291,7 @@ if (USE.ONLINE.ANNOTATION == TRUE) {
 		org.db <- get(org.package)
 	}
 	
-} else }
+} else {
 
 # Build offline annotation
 #if (is.null(org.db)) {
@@ -494,9 +495,9 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
 
     # this should now be manageable (many entries should have been removed)
     bm.annot.1 <- merge(bm.ensembl.annot.1, bm.entrez.annot.1, by="ensembl_gene_id")
-    bm.annot.1 <- merge(bm.annot.1, bm.go.annot.1, by="ensembl_gene_id")
-    bm.annot.1 <- merge(bm.annot.1, bm.goslim.annot.1, by="ensembl_gene_id")
-    bm.annot.1 <- merge(bm.annot.1, bm.extra.annot.1,  by="ensembl_gene_id")
+    bm.annot.1 <- merge(bm.annot.1, bm.go.annot.1, by = "ensembl_gene_id")
+    bm.annot.1 <- merge(bm.annot.1, bm.goslim.annot.1, by = "ensembl_gene_id")
+    bm.annot.1 <- merge(bm.annot.1, bm.extra.annot.1,  by = "ensembl_gene_id")
 
     write.table(bm.annot.1, file = paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/'), 
 				sep='\t', row.names=T, col.names=T)
@@ -516,11 +517,11 @@ if ( file.exists(paste(annotation.dir, 'biomaRt.annotation.1st.txt', sep='/')) )
 # And now we are ready with our reference info at hand...
 
 
-#################################################################################
-#
-# Get the alignments and feature counts
-#
-#################################################################################
+##########################################
+#										 #
+# Get the alignments and feature counts	 #
+#										 #
+##########################################
 
 fc <- NULL
 if ( ALIGN == TRUE ) {
@@ -545,9 +546,10 @@ if ( ALIGN == TRUE ) {
 
 	#### If Rsubread is used:
 	# One single file will be generated with the counts for all samples
-	cat("\nUsing existing feature count files\n")
-	fc <- read.delim(paste(feature.count.dir, "featureCounts.tab", sep = "/"),
-					header = TRUE, row.names = 1, sep = "\t")
+	
+	#cat("\nUsing existing feature count files\n")
+	#fc <- read.delim(paste(feature.count.dir, "featureCounts.tab", sep = "/"),		### ADRIAN
+	#				header = TRUE, row.names = 1, sep = "\t")
 
 	if (is.null(fc)){
 	
@@ -618,6 +620,7 @@ if (USE.EDGER) {
 		as.png(volcanoplot(fit, highlight = n.genes/2, coef = i, names=fit$genes$SYMBOL, cex=0.8, pch=1),
         	out.png)
 	}
+    
     # Testing Differentially expressed genes relative to a threshold
     fit.thres <- eR.fit.treat(fit, threshold = significance.threshold, folder)
     
@@ -626,15 +629,12 @@ if (USE.EDGER) {
     saveRDS(fit.thres, 
             file=paste(folder, '/edgeR/annotatedVOOMfit+.gt.',
                        significance.threshold, '.rds', sep=''))
-    #	'fit' can later be recovered with: 
-    #		fit <- readRDS(file=paste(folder, '/annotatedVOOMfit+.rds', sep=''))
+
     # and save as well as Rdata file
     save(fit, file=paste(folder, '/edgeR/annotatedVOOMfit+.RData', sep=''))
     save(fit.thres, 
          file = paste(folder, '/edgeR/annotatedVOOMfit+.gt.',
                     significance.threshold, '.RData', sep=''))
-    #	'fit' can later be recovered with: 
-    #		fc <- load(file=paste(folder, '/annotatedVOOMfit+.RData', sep=''))
 
 
     # -----------------------------------------------------------------
@@ -646,7 +646,11 @@ if (USE.EDGER) {
     # 
     # this carries out all comparisons and annotates each fit obtained
     # saving all of them in a list
-    eR.data <- eR.dge.all.comparisons(dge, design.column, ens.db = ens.db, biomart.ann = bm.annot.1, folder)
+    eR.data <- eR.dge.all.comparisons(	dge = dge,
+										design.column,
+										ens.db = ens.db,
+										biomart.db = bm.annot.1,
+										folder = folder)
 
     # now eR.data is a list where each element is a comparison A-B (A minus B),
     # i.e. each A-B is a list of tables, one of them named "table" and containing
@@ -696,14 +700,25 @@ if (USE.DESEQ2) {
                                       colData = colData,  
                                       design = as.formula(paste("~", design.column)), 
                                       tidy=F)
-        dds <- DESeq(dds)
-
+        dds <- DESeq(dds)		
+		
         # SAVE DESEQ ANALYSIS
         # -------------------        
 		save(dds, file = paste(out.base, "RData", sep='.'))
         saveRDS(dds, file = paste(out.base, "rds", sep='.'))
     }
-
+	
+	# Do some diagnostic plots: PCA
+	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_PCA_plot.png" sep='')
+	as.png(plotPCA(varianceStabilizingTransformation(dds), intgroup = design.column),
+        	out.png)
+	
+	# Plot Dispersion Estimates
+	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_DispEstimates.png" sep='')
+	as.png(plotDispEsts(dds, main = "DESeq2 Per-gene Dispersion Estimates"),
+        	out.png)
+	
+	
     cat("\n\tDESeq2 analysis produced the following models\n\n")
     print(resultsNames(dds))
 	
@@ -739,7 +754,7 @@ if (USE.DESEQ2) {
 							out.file.base = out.file.base,
 							out.dir = folder)
 	
-		dds.results[[comparison]]$result.ann %>% head(10)
+		if (VERBOSE) dds.results[[comparison]]$result.ann %>% head(10)
 	}
 	
     #annot <- ds2.get.annotation.ens.org(dds, ens.db, org.db)
@@ -845,8 +860,6 @@ if (USE.DESEQ2) {
     #    }
     #}
 	
-    print(names(dds.results))
-
     if (INTERACTIVE) {
         ds2.interactively.print.n.most.significant.de.genes(dds.results, n=10)
 
@@ -863,10 +876,15 @@ if (USE.DESEQ2) {
 	short.title('Gene Set Enrichment Analysis')
 
 	ds.data <- dds.results
-    # we do not know what is the best upper limit, so we'll try several
-    ms <- 500 # default value in GSEA, should work as well as the others
-    #for (ms in c(50, 100, 250, 500)) {
-    for (ms in c(500)) {					# use this to save computation time
+    
+	# For GSEA, we need to define a maximum number of genes we want to include per group
+	# when performing clustering. For large groups, the ontology will be hierarchically 
+	# superior and the functions retrieved will be generic. In contrastm, for small groups,
+	# the ontology will be more specific.
+	#
+	# We do not know what is the best upper limit, so we'll try several
+
+    for (ms in c(50, 100, 250, 500)) {
         for (cmp.name in names(ds.data)) {
             # for each comparison name
             cmp.data <- ds.data[[ cmp.name ]]
@@ -897,7 +915,9 @@ if (USE.DESEQ2) {
 									out.name = 'GO_cProf',
 						  			use.description = TRUE,
 						  			OrgDb = org.db,
+									kegg_organism = "gga",	### ADRIAN : Create Option
 						  			top.n = 10,
+									#n.categories = 10,		### ADRIAN : Create Option
 						  			top.biblio = 5,
 						  			verbose = FALSE)
 		}
@@ -907,11 +927,11 @@ if (USE.DESEQ2) {
     # -------------------------
     # Analyze GO representation
     # -------------------------
-    ds2.analyze.go.representation(ds.data, bm.go.annot, folder)
+    ds2.analyze.go.representation(ds.data = ds.data, bm.go.annot = bm.annot.1, folder)
 
-    ds2.analyze.go.ancestry(ds.data, l2fc.threshold=0, folder)
+    ds2.analyze.go.ancestry(ds.data = ds.data, l2fc.threshold = 0, folder)
 
-    ds2.analyze.pfam.representation(ds.data, bm.fam.annot, folder)
+    ds2.analyze.pfam.representation(ds.data = ds.data, bm.fam.annot = bm.annot.1, folder)
 
 
     # ------------------------------
@@ -1289,6 +1309,7 @@ if (USE.DESEQ2) {
                 "%s/DESeq2_dbscan_grps_silhouette_%s_%s.png",
 	        dbscan_folder, ccol_ref)
         as.png(fviz_nbclust(ron, dbscan, method="silhouette", k.max=maxclust), out.png)
+        
         ### JR ### eps should be tuned for each experiment
         dcl <- dbscan(ron, eps=0.2, MinPts=2, showplot=1)
         fviz_cluster(dcl, data=ron)

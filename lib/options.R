@@ -49,8 +49,8 @@ get.options <- function()
         source(paste('~/', default.config.file, sep=''))
     # check if there is a per-directory user-defined default options file
     # that will override global and user-global defaults
-    if (file.exists(default.config.file))
-        source(default.config.file)
+    if (file.exists(paste('../', default.config.file)))
+        source(paste('../', default.config.file))
 
 
     # first define all the known options

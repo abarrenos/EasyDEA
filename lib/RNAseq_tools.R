@@ -1255,8 +1255,7 @@ eR.save.top.ann.thresh <- function(fit, folder, n.genes=500, sort.by='p', coef=1
 
 # annotation functions for edgeR
 
-
-eR.fit.annotate <- function(fit, ens.db, biomart) {
+eR.fit.annotate <- function(fit, ens.db, biomart.db) {
 
 	if (all(str_sub(rownames(fit), 1, 3) == "ENS")){
         by='GENEID'
@@ -1264,7 +1263,6 @@ eR.fit.annotate <- function(fit, ens.db, biomart) {
     	by='GENENAME'}
         
      ens.ann <- ensembldb::select(ens.db, 
-                  column=by, 
                   keytype=by, keys=rownames(fit), 
                   columns= c('SEQNAME', 'SYMBOL', 'DESCRIPTION',
                              'GENENAME', 'GENEID', 'ENTREZID',
@@ -1290,15 +1288,16 @@ eR.fit.annotate <- function(fit, ens.db, biomart) {
     #	This works if they are in the same order
     #fit$genes <- ens.ann.1
     #	This works by matching rownames and gene IDs
-    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[,by]), ]
+    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[,by], nomatch = NA), ]
     rownames(fit$genes) <- rownames(fit)
     #
     # add biomart annotation
-    fit$genes <- merge(fit$genes, biomart, by.x="GENEID", by.y="ensembl_gene_id")
+    fit$genes <- merge(fit$genes, biomart.db, by.x="GENEID", by.y="ensembl_gene_id", all.x = TRUE)
     #head(fit$genes)
 
 
     return (fit)
+
 }
 
 eR.save.fit <- function(fit, name) {
@@ -1731,9 +1730,9 @@ eR.voom.variation.analysis <- function(dge, folder)
     #colnames(design) <- levels(target)
     cat("\n\tGenerating Design Matrix\n\n")
 
-    design <- model.matrix(~ dge$sample$group)
-    colnames(design) <- c("Intercept", levels(dge$sample$group)[-1])
-	rownames(design) <- rownames(dge$sample)
+    design <- model.matrix(~ dge$samples$group)
+    colnames(design) <- c("Intercept", levels(dge$samples$group)[-1])
+	rownames(design) <- rownames(dge$samples)
     if (VERBOSE) print(design)
 
     # IF WE DO NOT INCLUDE THE "~ 0 + " IN THE FORMULA, MODEL.MATRIX()
@@ -1910,7 +1909,7 @@ eR.fit.annotate.save <- function(fit,
     # of this list.
     #
     #	This checks that genes and annotation go in the same order)
-    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[, by]), ]
+    fit$genes <- ens.ann.1[ match(rownames(fit), ens.ann.1[, by], nomatch = NA), ]
 
     
     # and now we will also add to 'fit$genes' the biomaRt annotation
@@ -1968,7 +1967,7 @@ eR.fit.treat <- function(fit,
 eR.dge.all.comparisons <- function(dge, 
                                design.column,
                                ens.db,
-                               biomart.ann,
+                               biomart.db,
                                folder)
 {
 	cat("\n\tPerforming all pairwise comparisons by:", toupper(design.column), "\n")
@@ -1977,8 +1976,8 @@ eR.dge.all.comparisons <- function(dge,
 	# We need to define a new design without intercept, since we do not want to
 	# fix a reference level.
 
-    design <- model.matrix(~0 + dge$sample$group)
-    grps <- levels(as.factor(dge$sample$group))
+    design <- model.matrix(~0 + as.factor(dge$samples$group))
+    grps <- levels(as.factor(dge$samples$group))
 	colnames(design) <- grps
     n.grps <- length(grps)
 	if (VERBOSE) cat("\nGroups:", grps, "\n")
@@ -1986,7 +1985,7 @@ eR.dge.all.comparisons <- function(dge,
 	## Fit new genewise multiple linear models with quasilikelihood varianc
 	## estimation.
 	cat("\n\tComputing Quasi-Likelihood Dispersion\n\n")
-    qlfit <- glmQLFit(dge, design, robust = TRUE, abundance.trend = TRUE)
+    qlfit <- glmQLFit(dge, design = design, robust = TRUE, abundance.trend = TRUE)
     out.png <- paste(folder, '/edgeR/img/edgeR_QLFit_', design.column, '.png', sep='')
     as.png(plotQLDisp(qlfit), out.png)
 
@@ -2019,7 +2018,7 @@ eR.dge.all.comparisons <- function(dge,
                               design.column, '_', i, '-', j, '.png', sep='')
             as.png( { 
                     plotMD(qlf.cmp)
-                    abline(h=c(-1, 1), col="darkgreen")
+                    abline(h = c(-1, 1), col="darkgreen")
                     }, png.file)
                     
             if (INTERACTIVE) {
@@ -2030,7 +2029,7 @@ eR.dge.all.comparisons <- function(dge,
             
             # ANNOTATE the results without saving them
             ### NOTE consider using eR.fit.annotate.ensembl.biomart
-            qlf.cmp <- eR.fit.annotate(qlf.cmp, ens.db, biomart.ann)
+            qlf.cmp <- eR.fit.annotate(qlf.cmp, ens.db = ens.db, biomart.db = biomart.db)
 
             name <- paste(folder, '/edgeR/fit_', design.column, '_', i, '_-_', j, '_annot', sep='')
             # qlf.cmp is a list of tables, if we want to save it,
@@ -2055,17 +2054,17 @@ eR.dge.all.comparisons <- function(dge,
 	    # ( see https://www.kegg.jp/kegg/catalog/org_list.html )
 	    #
             # eR.go <- goana(qlf.cmp, species="Cj")
-	    # eR.go <- goana(qlf.cmp, species="Gg")
-	    # eR.kegg <- kegga(qlf.cmp, species.KEGG="cjo")
-	    # eR.kegg <- kegga(qlf.cmp, species.KEGG="gga")
-	    # topGO(go, sort="up", number=n.genes)
-	    # topKEGG(keg, sort="up", number=n.genes)
+	    	# eR.go <- goana(qlf.cmp, species="Gg")
+	    	# eR.kegg <- kegga(qlf.cmp, species.KEGG="cjo")
+	    	# eR.kegg <- kegga(qlf.cmp, species.KEGG="gga")
+	    	# topGO(go, sort="up", number=n.genes)
+	    	# topKEGG(keg, sort="up", number=n.genes)
 
             qlf.result <- list(
-	                      eR.cmp=qlf.cmp
+	                      eR.cmp = qlf.cmp
                           #, eR.go=eR.go
-			      		#, eR.kegg=eR.kegg
-			      )
+			      			#, eR.kegg=eR.kegg
+			      			)
             eR.data[[formula]] <- qlf.result 
             #print(topTags(qlf.cmp))
         }
@@ -2153,10 +2152,10 @@ ds2.dds.compare.annotate.save <- function(dds,
     # ensembl.ann matches all ENSMEBL-ID in the cmp results 
     # (but lacks description)
     cmp.df.a <- cbind(cmp.df.a, 
-                      ensembl.ann[ match(cmp.df.a$ensembl.gene.id, ensembl.ann$GENEID), ])
+                      ensembl.ann[ match(cmp.df.a$ensembl.gene.id, ensembl.ann$GENEID, nomatch = NA), ])
     # bm.annot fails to annotate some entries (why?)
     cmp.df.a <- cbind(cmp.df.a, 
-                      biomart.ann[ match(cmp.df.a$ensembl.gene.id, biomart.ann$ensembl_gene_id), ])
+                      biomart.ann[ match(cmp.df.a$ensembl.gene.id, biomart.ann$ensembl_gene_id, nomatch = NA), ])
 
     # and now save
     # save summary
@@ -2206,13 +2205,13 @@ ds2.dds.plot.and.save <- function(dds,
     # (but lacks description)
     raw.df <- cbind(
                 raw.df, 
-                ensembl.ann[ match(raw.df$ensembl.gene.id, ensembl.ann$GENEID), ]
+                ensembl.ann[ match(raw.df$ensembl.gene.id, ensembl.ann$GENEID, nomatch = NA), ]
                 )
     # bm.annot fails to annotate some entries (why?)
     raw.df <- cbind(
                 raw.df, 
                 biomart.ann[ 
-                  match(raw.df$ensembl.gene.id, biomart.ann$ensembl_gene_id),
+                  match(raw.df$ensembl.gene.id, biomart.ann$ensembl_gene_id, nomatch = NA),
                    ]
                 )
 
@@ -2334,9 +2333,9 @@ ds2.dds.plot.and.save <- function(dds,
     # annotate the sorted significant data
     srt.df <- data.frame(ensembl.gene.id=rownames(srt), srt)
     srt.df <- cbind(srt.df, 
-                ensembl.ann[ match(srt.df$ensembl.gene.id, ensembl.ann$GENEID), ])
+                ensembl.ann[ match(srt.df$ensembl.gene.id, ensembl.ann$GENEID, nomatch = NA), ])
     srt.df <- cbind(srt.df, 
-                biomart.ann[ match(srt.df$ensembl.gene.id, biomart.ann$ensembl_gene_id), ])
+                biomart.ann[ match(srt.df$ensembl.gene.id, biomart.ann$ensembl_gene_id, nomatch = NA), ])
     if (save) {
         ofile <- paste(folder, "/DESeq2/signif/signif_sorted_", out.base, "_annotated.tab", sep='')
         cat("    saving", ofile,'\n')
@@ -2423,10 +2422,18 @@ ds2.analyze.go.representation <- function(ds.data, bm.go.annot, folder)
     for (n in names(ds.data)) {
         cat("Processing GOs for", n, '\n')
         sig <- as.data.frame(ds.data[[n]]$signif)
-        sig.a <- as.data.frame(ds.data[[n]]$signif.annot)
-        sig$ensembl_gene_id <- rownames(sig)
-        ourFilterType <- "ensembl_gene_id"
-        filterValues <- sig$ensembl_gene_id
+        sig.a <- as.data.frame(ds.data[[n]]$signif.ann)
+        filterValues <- rownames(sig)
+
+		if (all(str_sub(filterValues , 1, 3) == "ENS")){
+        	by = 'ensembl_gene_id'
+    	} else if (! any(is.na(as.numeric(filterValues)))){
+    		by = 'entrezgene_id'
+		} else {
+			by = 'entrezgene_accession'}
+
+        sig[,by] <- filterValues
+		
         # this will give us ALL GO annotations
         # we should use the saved searches from above to save bandwidth.
     #    gos <- getBM(attributes=c("ensembl_gene_id", 
@@ -2435,36 +2442,40 @@ ds2.analyze.go.representation <- function(ds.data, bm.go.annot, folder)
     #                 mart=mart.db,
     #                 filters=ourFilterType,
     #                 values=filterValues)
-        gos <- bm.go.annot[ bm.go.annot$ensembl_gene_id %in% filterValues,
-                            c("ensembl_gene_id", 
-                              "go_id", "name_1006", 
-                              "definition_1006" ) ]
-        sig.a <- merge(sig, gos, by="ensembl_gene_id")
+        gos <- bm.go.annot[ bm.go.annot[,by] %in% filterValues,
+                            c(	"ensembl_gene_id",
+								"entrezgene_id",
+								"entrezgene_accession",
+                              	"go_id", "name_1006", 
+                              	"definition_1006" ) ]
+		
+        sig.a <- merge(sig, gos, by = by)
         table(sig.a$go_id)	# this gives counts, but we'd like to multiply those
                                 # counts by log2FC
-        #sig.a[ , c(1, 3, 10)]
-        # aggregate log2FC by go_id and sum the values
+        
+		# Aggregate log2FC by go_id and sum the values
         print(
         aggregate(sig.a$log2FoldChange, 
-                  by=list(Category=sig.a$go_id),
-                  FUN=sum)
-        )
-        # or with formula interface
+                  by = list(Category=sig.a$go_id),
+                  FUN=sum))
+       
+	    # Or with formula interface
         gosums <- aggregate(log2FoldChange ~ go_id, sig.a, sum)
         gosums <- gosums[ order(gosums$log2FoldChange), ]
-        # annotate gosums
-        gosums.a <- cbind(gosums, bm.annot.1[ match(gosums$go_id, bm.annot.1$go_id), ])
+        
+		# Annotate gosums
+        gosums.a <- cbind(gosums, bm.annot.1[ match(gosums$go_id, bm.annot.1$go_id, nomatch = NA), ])
 
         out.dir<- paste(folder, '/DESeq2/go', sep='')
         dir.create(out.dir, showWarning=FALSE)
         out.file <- paste(out.dir, '/GO_', n, "_sum.tab", sep='')
-        out.file <- paste(folder, '/DESeq2/GO_', n, "_sum.tab", sep='')
         write.table(gosums.a, out.file, sep='\t')
 
         goavgs <- aggregate(log2FoldChange ~ go_id, sig.a, mean)
         goavgs <- gosums[ order(gosums$log2FoldChange), ]
-        # annotate gosums
-        goavgs.a <- cbind(goavgs, bm.annot.1[ match(goavgs$go_id, bm.annot.1$go_id), ])
+        
+		# annotate gosums
+        goavgs.a <- cbind(goavgs, bm.annot.1[ match(goavgs$go_id, bm.annot.1$go_id, nomatch = NA), ])
         out.file <- paste(out.dir, '/GO_', n, "_average.tab", sep='')
         write.table(goavgs.a, out.file, sep='\t')
     }
@@ -2472,8 +2483,8 @@ ds2.analyze.go.representation <- function(ds.data, bm.go.annot, folder)
 }
 
 
-annotate.go.ancestry <- function (annot.data, l2fc.threshold, outDir) {
-    res <- annot.data
+annotate.go.ancestry <- function (ann.results, l2fc.threshold, outDir) {
+    res <- ann.results
 
     goBPanc <- as.list(GOBPANCESTOR)
     # remove GO terms that do not have any ancestor
@@ -2491,23 +2502,31 @@ annotate.go.ancestry <- function (annot.data, l2fc.threshold, outDir) {
     go.l2fc <- res[ , c("ensembl_gene_id", "log2FoldChange", "GENENAME", "go_id") ]
 
     for (i in 1:nrow(res)) {
+        
+        # Skip if ancestry is null
         if ((i %% 100) == 0) cat(".")
         if (is.null(res[i, "go_id"])) next
         if (is.na(res[i, "go_id"])) next
         if (res[i, "go_id"] == '') next
+        
         anc <- goBPanc[[ res[i, "go_id"] ]]
-        if (! is.null(anc) & ! length(anc) == 0) {
-            if (! is.na(anc) & anc != '') {
+        anc
+        
+		if (is.null(anc)) { next } else if (anc == "") { next }
+        if (length(anc) > 0) next
+		#if (is.na(anc)) next
+        #if (anc == '') next
+		if (length(anc) > 0) next
+  
             # add  these GoIds to the table of gene/l2FC/GoIds 
-                for (anc.goid in anc) {
-                    go.l2fc <- rbind(go.l2fc, data.frame(
-                          ensembl_gene_id=res[i, "ensembl.gene.id"],
-                          log2FoldChange=res[i, "log2FoldChange"],
-                          GENENAME=res[i, "GENENAME"],
-                          go_id=anc.goid))
-                }
-            }
+        for (anc.goid in anc) {
+            go.l2fc <- rbind(go.l2fc, data.frame(
+                  ensembl_gene_id=res[i, "ensembl.gene.id"],
+                  log2FoldChange=res[i, "log2FoldChange"],
+                  GENENAME=res[i, "GENENAME"],
+                  go_id=anc.goid))
         }
+        
         anc <- goCCanc[[ res[i, "go_id"] ]]
         if (! is.null(anc) ) {
             if (! is.na(anc) & anc != '') {
@@ -2565,6 +2584,7 @@ annotate.go.ancestry <- function (annot.data, l2fc.threshold, outDir) {
     go.l2fc <- go.l2fc[ order(go.l2fc$log2FoldChange, decreasing=T), ]
     go.l2fc.sum <- go.l2fc.sum[ order(go.l2fc.sum$sum.l2fc, decreasing=T), ]
     go.l2fc.avg <- go.l2fc.avg[ order(go.l2fc.avg$avg.l2fc, decreasing=T), ]
+	
     # sort by abs(log2FC)
     go.l2fc.sum.abs <- go.l2fc.sum[ order(abs(go.l2fc.sum$sum.l2fc), decreasing=T), ]
     go.l2fc.avg.abs <- go.l2fc.avg[ order(abs(go.l2fc.avg$avg.l2fc), decreasing=T), ]
@@ -2592,12 +2612,12 @@ ds2.analyze.go.ancestry <- function(ds.data, l2fc.threshold=0, folder)
 
     l2fc.threshold <- 0
 
-    out.dir <- paste(folder, '/Deseq2/goanc')
+    out.dir <- paste(folder, '/DESeq2/goanc')
     dir.create(out.dir, showWarning=FALSE)
 
     for (n in names(ds.data)) {
         cat("\nTracing GO ancestry for", n, '\n')
-        res <- ds.data[[n]]$signif.annot
+        res <- ds.data[[n]]$signif.ann
 
         annotate.go.ancestry(res, l2fc.threshold, out.dir)
 
@@ -2634,7 +2654,7 @@ ds2.analyze.pfam.representation <- function(ds.data, bm.fam.annot, folder)
         names(sig)
         sig$ensembl_gene_id <- rownames(sig)
         sig.a <- cbind(sig, 
-               bm.fam.annot[ match(sig$ensembl_gene_id, bm.fam.annot$ensembl_gene_id), ])
+               bm.fam.annot[ match(sig$ensembl_gene_id, bm.fam.annot$ensembl_gene_id, nomatch = NA), ])
         pfam.ids <- sig.a$pfam[ ! is.na(sig.a$pfam) ]
         aggregate(sig.a$log2FoldChange, by=list(Category=sig.a$pfam), FUN=sum)
 
@@ -2867,153 +2887,158 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
                       out.dir=paste(folder, 'go_cProf', sep='/'), 
                       out.name='GO_cProf',
                       use.description=TRUE,
-                      OrgDb,
+                      OrgDb = NULL,
                       kegg_organism = NULL,			# (cjo = coturnix japonica)
                                              # (gga = gallus gallus)
-                      top.n=10,
-                      top.biblio=5,
+                      top.n = 10,			# Top number of GO/KEGG categories to represent
+                      top.biblio = 5,
                       verbose=FALSE) {
         
     gseaDat <- filter(ann.shrunk.lfc, !is.na(ENTREZID))
     ranks <- gseaDat$lfc
     names(ranks) <- gseaDat$ENTREZID
-    ranks<-na.omit(ranks)
+    ranks <- na.omit(ranks)
 
     s.ranks <- sort(ranks, decreasing=T)
     
-    ### G O annotation
-    #
-    gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-    if (VERBOSE) cat("Doing GO GSEA with Cluster profiler\n")
-    if ( ! file.exists(gse.out.file) ) {
-        gse <- gseGO(geneList=s.ranks, 
-                     ont ="ALL", 
-                     keyType = "ENTREZID", 
-                     minGSSize = 3, 
-                     maxGSSize = max.size, 
-                     pvalueCutoff = 0.05, 
-                     verbose = TRUE, 
-                     OrgDb = OrgDb, 
-                     pAdjustMethod = "fdr")
-                     #pAdjustMethod = "none")
-        if (dim(gse)[1] == 0) {
-            # p.adjusting may have failed to produce any result:
-            # Try without correction issuing a warning
-            gse <- gseGO(geneList=s.ranks, 
-                     ont ="ALL", 
-                     keyType = "ENTREZID", 
-                     minGSSize = 3, 
-                     maxGSSize = max.size, 
-                     pvalueCutoff = 0.05, 
-                     verbose = TRUE, 
-                     OrgDb = OrgDb, 
-                     #pAdjustMethod = "fdr")
-                     pAdjustMethod = "none")
-            out.name <- paste(out.name, '.raw_p', sep='')
-        }
-        if (dim(gse)[1] > 1) {
-            saveRDS(gse, file=gse.out.file)
-            gse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
-            write.table(gse, file=gse.tab.file, row.names=T, col.names=T, sep='\t')
-        }
-    } else {
-        if (file.exists(gse.out.file)) {
-            # default is adjusted p
-            gse <- readRDS(gse.out.file)
-        } else {
-            # try raw p
-            out.name <- paste(out.name, '.raw_p', sep='')
-            gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-            if (file.exists(gse.out.file)) {
-                gse <- readRDS(gse.out.file)
-            } else {
-                # use an empty table so next check can be done
-                gse <- table(c())
-            }
-        }
-    }
-    # if dim(gse)[1] == 0 then we won't save anything
-    #	hopefully, if re-run again it might work next time by chance
-    # else
-    if (dim(gse)[1] > 0) {
-	if (VERBOSE) cat("Plotting GO GSEA with Cluster profiler\n")
-        # DO GENERIC PLOTS
-        # **Dotplot**: For each group shows if it is up or down 
-        # regulated and to which extent. The circle size is proportional to the
-        # size (the number of genes contained) of the group, and the color to the
-        # p-value.
-        out.png <- paste(out.dir, '/', out.name, '.GOdotplot.png', sep='')
-        as.png(
-            dotplot(gse, showCategory=20, split=".sign") + facet_grid(.~.sign)
-            , out.png)
+    ### GO annotation
+    
+	if (! is.null(OrgDb)){
+	
+		gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
+    	if (VERBOSE) cat("Doing GO GSEA with Cluster profiler\n")
+    	if ( ! file.exists(gse.out.file) ) {
+        	gse <- gseGO(geneList=s.ranks, 
+                    	 ont ="ALL", 
+                    	 keyType = "ENTREZID", 
+                    	 minGSSize = 3, 
+                    	 maxGSSize = max.size, 
+                    	 pvalueCutoff = 0.05, 
+                    	 verbose = TRUE, 
+                    	 OrgDb = OrgDb, 
+                    	 pAdjustMethod = "fdr")
+                    	 #pAdjustMethod = "none")
+        	if (dim(gse)[1] == 0) {
+            	# p.adjusting may have failed to produce any result:
+            	# Try without correction issuing a warning
+            	gse <- gseGO(geneList=s.ranks, 
+                    	 ont ="ALL", 
+                    	 keyType = "ENTREZID", 
+                    	 minGSSize = 3, 
+                    	 maxGSSize = max.size, 
+                    	 pvalueCutoff = 0.05, 
+                    	 verbose = TRUE, 
+                    	 OrgDb = OrgDb, 
+                    	 #pAdjustMethod = "fdr")
+                    	 pAdjustMethod = "none")
+            	out.name <- paste(out.name, '.raw_p', sep='')
+        	}
+        	if (dim(gse)[1] > 1) {
+            	saveRDS(gse, file=gse.out.file)
+            	gse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
+            	write.table(gse, file = gse.tab.file, row.names = T, col.names=T, sep='\t')
+        	}
+    	} else {
+        	if (file.exists(gse.out.file)) {
+            	# default is adjusted p
+            	gse <- readRDS(gse.out.file)
+        	
+			} else {
+            	# try raw p
+            	out.name <- paste(out.name, '.raw_p', sep='')
+            	gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
+            	if (file.exists(gse.out.file)) {
+                	gse <- readRDS(gse.out.file)
+            	} else {
+                	# use an empty table so next check can be done
+                	gse <- table(c())
+            	}
+        	}
+    	}
+    	# if dim(gse)[1] == 0 then we won't save anything
+    	#	hopefully, if re-run again it might work next time by chance
+    	# else
+    	if (dim(gse)[1] > 0) {
+		if (VERBOSE) cat("Plotting GO GSEA with Cluster profiler\n")
+        	# DO GENERIC PLOTS
+        	# **Dotplot**: For each group shows if it is up or down 
+        	# regulated and to which extent. The circle size is proportional to the
+        	# size (the number of genes contained) of the group, and the color to the
+        	# p-value.
+        	out.png <- paste(out.dir, '/', out.name, '.GOdotplot.png', sep='')
+        	as.png(
+            	dotplot(gse, showCategory = top.n, split=".sign") + facet_grid(.~.sign)
+            	, out.png)
 
-        # **Enrichment map**: organizes terms in a network with edges 
-        # connecting overlapping gene sets (i.e. shows which gene sets contain common
-        # genes). Dot diameter represents the size of the gene set (the number of genes
-        # it contains) and color represents the adjusted probability.
-        out.png <- paste(out.dir, '/', out.name, '.GOemmaplot.png', sep='')
-        as.png(
-            emapplot(pairwise_termsim(gse), showCategory = top.n)
-            , out.png)
+        	# **Enrichment map**: organizes terms in a network with edges 
+        	# connecting overlapping gene sets (i.e. shows which gene sets contain common
+        	# genes). Dot diameter represents the size of the gene set (the number of genes
+        	# it contains) and color represents the adjusted probability.
+        	out.png <- paste(out.dir, '/', out.name, '.GOemmaplot.png', sep='')
+        	as.png(
+            	emapplot(pairwise_termsim(gse), showCategory = top.n)
+            	, out.png)
 
-        # **Ridgeplot**: density plots grouped by gene set depicting
-        # the frequency of fold change values per gene within each set. Helps 
-        # interpret up/down-regulated pathways.
-        out.png <- paste(out.dir, '/', out.name, '.GOridgeplot.png', sep='')
-        as.png(
-            ridgeplot(gse) + labs(x = "enrichment distribution")
-            , out.png)
+        	# **Ridgeplot**: density plots grouped by gene set depicting
+        	# the frequency of fold change values per gene within each set. Helps 
+        	# interpret up/down-regulated pathways.
+        	out.png <- paste(out.dir, '/', out.name, '.GOridgeplot.png', sep='')
+        	as.png(
+            	ridgeplot(gse) + labs(x = "enrichment distribution")
+            	, out.png)
 
-        # **PubMed trend** of enriched terms
-        # Plots the number/proportion of publications trend based on 
-        # the query result from PubMed Central.
-        out.png <- paste(out.dir, '/', out.name, '.GOpmcplot.png', sep='')
-        cur.year <- as.integer(format(Sys.Date(), "%Y"))
-        terms <- gse$Description[1:top.biblio]
-        as.png(
-            pmcplot(terms, (cur.year-10):(cur.year-1), proportion=FALSE)
-            , out.png)
-        
-        # DO DETAILED PLOTS
-        for (i in 1:dim(gse)[1] ) {
-            # **GSEA plot**: __Plot of the Running Enrichment Score__ (green
-            # line) for a gene set as the analysis walks down the ranked gene list,
-            # including the location of the maximum enrichment score (the red line).
-            # The black lines in the Running Enrichment Score show where the members of the
-            # gene set appear in the ranked list of genes, indicating the leading edge
-            # subset.
-            # 
-            # __Ranked list metric__ shows the value of the ranking
-            # metric (log2 fold change) as you move down the list of ranked genes. The
-            # ranking metric measures a gene’s correlation with a phenotype.
+        	# **PubMed trend** of enriched terms
+        	# Plots the number/proportion of publications trend based on 
+        	# the query result from PubMed Central.
+        	out.png <- paste(out.dir, '/', out.name, '.GOpmcplot.png', sep='')
+        	cur.year <- as.integer(format(Sys.Date(), "%Y"))
+        	terms <- gse$Description[1:top.biblio]
+        	as.png(
+            	pmcplot(terms, (cur.year-10):(cur.year-1), proportion=FALSE)
+            	, out.png)
 
-            # Use the `Gene Set` param for the index in the title, and as the value for geneSetId
-            out.png <- paste(out.dir, '/', 
-                    out.name, '.GOgseaplot.', i, '.', gse$ID[i], '.png', sep='')
-            as.png(
-                gseaplot(gse, by = "all", title = gse$Description[i], geneSetID = i)
-                , out.png)
+        	# DO DETAILED PLOTS
+        	for (i in 1:dim(gse)[1] ) {
+            	# **GSEA plot**: __Plot of the Running Enrichment Score__ (green
+            	# line) for a gene set as the analysis walks down the ranked gene list,
+            	# including the location of the maximum enrichment score (the red line).
+            	# The black lines in the Running Enrichment Score show where the members of the
+            	# gene set appear in the ranked list of genes, indicating the leading edge
+            	# subset.
+            	# 
+            	# __Ranked list metric__ shows the value of the ranking
+            	# metric (log2 fold change) as you move down the list of ranked genes. The
+            	# ranking metric measures a gene’s correlation with a phenotype.
 
-            # **Category Netplot**: shows the
-            # linkage between genes and biological concepts as a network (helpful to see
-            # which genes are involved in enriched pathways and genes that may belong to
-            # multiple annotation categories).
-            out.png <- paste(out.dir, '/', 
-                    out.name, '.GOcnetplot.', i, '.', gse$ID[i], '.png', sep='')
-            # categorySize can be either 'pvalue' or 'geneNum'
-            as.png(
-                cnetplot(gse, categorySize="pvalue", foldChange=s.ranks, 
-                         showCategory=i)
-                , out.png)
-        }
-        #out.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
-        out.file <- gse.out.file
-        write.table(gse, file=gse.out.file, row.names=T, col.names=T, sep='\t')
+            	# Use the `Gene Set` param for the index in the title, and as the value for geneSetId
+            	out.png <- paste(out.dir, '/', 
+                    	out.name, '.GOgseaplot.', i, '.', gse$ID[i], '.png', sep='')
+            	as.png(
+                	gseaplot(gse, by = "all", title = gse$Description[i], geneSetID = i)
+                	, out.png)
+
+            	# **Category Netplot**: shows the
+            	# linkage between genes and biological concepts as a network (helpful to see
+            	# which genes are involved in enriched pathways and genes that may belong to
+            	# multiple annotation categories).
+            	out.png <- paste(out.dir, '/', 
+                    	out.name, '.GOcnetplot.', i, '.', gse$ID[i], '.png', sep='')
+            	# categorySize can be either 'pvalue' or 'geneNum'
+            	as.png(
+                	cnetplot(gse, categorySize="pvalue", foldChange=s.ranks, 
+                        	 showCategory=i)
+                	, out.png)
+        	}
+        	#out.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
+        	out.file <- gse.out.file
+        	write.table(gse, file=gse.out.file, row.names=T, col.names=T, sep='\t')
+    	}
     }
     
-    ### K E G G annotation
+	### K E G G annotation
     # let's try with KEGG (from the ENTREZID which is the same a ncbi-genid)
-    if (! is.null(kegg_organism)){
+    
+	if (! is.null(kegg_organism)){
     	
 		if (VERBOSE) cat("Doing KEGG GSEA with ClusterProfiler\n")
     	kse.out.file <- paste(out.dir, '/', out.name, '.topKEGG.tab', sep='')
@@ -3043,7 +3068,7 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
             	out.name <- paste(out.name, 'raw_p', sep='')
         	}
         	if (dim(kse)[1] > 1) {
-            	saveRDS(kse, file=kse.out.file)
+            	saveRDS(kse, file = kse.out.file)
             	kse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
             	# save also as text for user access
             	write.table(kse, file=kse.tab.file, row.names=T, col.names=T, sep='\t')
@@ -3077,8 +3102,8 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# p-value.</p>
         	out.png <- paste(out.dir, '/', out.name, '.KEGGdotplot.png', sep='')
         	as.png( 
-            	dotplot(kse, showCategory = 10, title = "Enriched Pathways" , 
-                    	split=".sign") + facet_grid(.~.sign)
+            	dotplot(kse, showCategory = top.n, title = "Enriched Pathways" , 
+                    	color = "p.adjust", split=".sign") + facet_grid(.~.sign)
             	, out.png)
 
         	# <p>B <strong>Enrichment map</strong>: organizes terms in a network with edges 
@@ -3098,7 +3123,8 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# categorySize can be either 'pvalue' or 'geneNum'
         	out.png <- paste(out.dir, '/', out.name, '.KEGGcnetplot.png', sep='')
         	as.png(
-            	cnetplot(kse, categorySize="pvalue", foldChange=s.ranks)
+            	cnetplot(	kse, showCategory = top.n, categorySize = "p.adjust",
+							cex_label_gene = 0.5, foldChange = s.ranks)
             	, out.png)
 
         	# <p>C <strong>Ridgeplot</strong>: density plots grouped by gene set depicting
@@ -3106,17 +3132,20 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# interpret up/down-regulated pathways.</p>
         	out.png <- paste(out.dir, '/', out.name, '.KEGGridgeplot.png', sep='')
         	as.png(
-            	ridgeplot(kse) + labs(x = "enrichment distribution")
+            	ridgeplot(kse, showCategory = top.n, fill = "p.adjust") + labs(x = "enrichment distribution")
             	, out.png)
 
         	# PubMed trend of enriched terms
         	# 
         	# Plots the number/proportion of publications trend based on the query result
         	# from PubMed Central.
+
         	out.png <- paste(out.dir, '/', out.name, '.KEGGpmcplot.png', sep='')
         	cur.year <- as.integer(format(Sys.Date(), "%Y"))
-	    	as.png(
-            	pmcplot(kse$description[1:5], (cur.year-10):(cur.year-1), proportion=FALSE)
+	    	terms <- kse@result$Description[1:top.biblio]
+			as.png(
+				pmcplot(terms, (cur.year-10):(cur.year-1),
+						proportion = FALSE)
             	, out.png)
 
         	cur.dir <- getwd()

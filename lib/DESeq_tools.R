@@ -345,10 +345,11 @@ analysePlotDESeq <- function(	#results,
 		if ( ! annotate) ann.shrunk <- NULL
 		
 		# Generate output list containing results    
-		res.list <- list(result.ann = results, 
-		            shrunk = shrunk.lfc, 
-		            shrunk.ann = ann.shrunk, 
-		            signif = srt.signif)
+		res.list <- list(	result.ann = results, 
+		            		shrunk = shrunk.lfc, 
+		            		shrunk.ann = ann.shrunk,
+							signif = srt.signif[,1:7],
+		            		signif.ann = srt.signif)
 		
 		# Save results as an object to avoid redundant analyses.
 		cat("\n\tSaving final results ...\n\n")		
