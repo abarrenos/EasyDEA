@@ -2716,176 +2716,10 @@ ds2.analyze.pfam.representation <- function(ds.data, bm.fam.annot, folder)
 }
 
 
-
-
-GO_fgsea <- function (ann.shrunk.lfc, 
-		      		max.size=250,
-                      out.dir=paste(folder, 'go_fgsea', sep='/'), 
-                      out.name='GO_fgsea',
-                      use.description=TRUE,
-                      top.n=20,
-                      top.biblio=5,
-                      verbose=FALSE) {
-    # Do GSEA on GO terms using fgsea
-
-    # Rank all genes on their fold change.
-    #	Here we exclude genes for which we have no EntrezID and
-    #	use shrunk LFC values
-#    gseaDat <- filter(ann.shrunk.lfc, !is.na(ENTREZID))
-    gseaDat <- filter(ann.shrunk.lfc, !is.na(GENEID))
-
-    ranks <- gseaDat$lfc
-    #names(ranks) <- gseaDat$ENTREZID
-    names(ranks) <- gseaDat$GENEID
-    head(ranks)
-    #uranks <- ranks[!duplicated(sort(names(ranks)))]
-
-    # plot all the ranked fold changes
-    out.png <- paste(out.dir, '/', out.name, '.barplot.png', sep='')
-    as.png(barplot(sort(ranks, decreasing=T)), out.png)
-    
-    # load pathways
-    #pathways <- ann.shrunk.lfc$ENTREZID
-    #pathways <- ann.shrunk.lfc$go_id
-    #names(pathways) <- gseaDat$ENTREZID
-    #names(pathways) <- gseaDat$GENEID
-    #upathways <- pathways[!duplicated(sort(names(pathway)))]
-    
-    # create a list of go_id terms where each term contains a vector
-    # of emsembl_gene_id in that term
-    #   first recover the annotation (in case we are re-run and do not
-    #   have it
-    if ( ! exists(substitute(bm.go.annot)) ) {
-        bm.go.annot <- read.table(paste(folder, '/biomart.go.tab', sep=''), 
-	            header=T, sep='\t')
-    }
-    #if ( ! exists(substitute(bm.goslim.annot)) ) {
-    #    bm.goslim.annot <- read.table(paste(folder, '/biomart.goslim.tab', sep=''), 
-    #	            header=T, sep='\t')
-    #}
-
-    if (use.description == FALSE) {
-        # split() will divide the gene-ids by their go-id
-        pathways <- split(bm.go.annot$ensembl_gene_id, bm.go.annot$go_id)
-    } else {
-        # Do the same but with large gene ontology names
-        # split() will divide the gene-ids by their go-name
-        pathways.go <- split(bm.go.annot$ensembl_gene_id, bm.go.annot$name_1006)
-    }
-    # do analysis
-    # the resulting table contains enrichment scores and p-values
-    out.file <- sprintf("%s/go_fgsea_10-%d.RData", out.dir, max.size)
-    if (file.exists(out.file)) {
-        load(file=out.file)
-    } else {
-        fgseaRes <- fgsea(pathways=pathways.go, 
-                          stats=ranks, 
-		          minSize=10, 
-		          maxSize=max.size, 
-                          nPermSimple=100000 
-                          )
-        save(fgseaRes, file=out.file)
-    }
-    if (verbose == TRUE)
-        head(fgseaRes[order(padj, -abs(NES)), ], n=10)
-
-    if (verbose == TRUE) {
-        # plot enrichment score
-        sorted.fgsea.res <- fgseaRes[order(padj, -abs(NES)), ]
-        sfr.names <- sorted.fgsea.res$pathway
-        for (i in 1:top.n) {
-            if (use.description == FALSE)
-                descr <- bm.go.annot[bm.go.annot$go_id == sfr.names[i], "name_1006"]
-            else
-                descr <- sfr.names[i]
-            print(
-                plotEnrichment(pathways.go[[ sfr.names[i] ]], ranks) +
-                    labs(title=descr)
-                )
-            ans <- readline("Press RETURN to continue: ")
-            if (ans == "q") break
-        }
-    }
-    # gsea table plot of top.n gene families
-    #   top_n() is now deprecated
-    topUp <- fgseaRes %>%
-        filter(ES > 0) %>%
-        top_n(top.n, wt=-padj)
-
-    topDown <- fgseaRes %>%
-        filter(ES < 0) %>%
-        top_n(top.n, wt=-padj)
-
-    topPathways <- bind_rows(topUp, topDown) %>%
-        arrange(-ES)
-    # last resort when "pos" is used    
-    #topPathways <- sorted.fgsea.res[1:top.n, ]
-
-    # do the plots and save descriptions
-    out.file <- paste(out.dir, "/topUp.", top.n, '.txt', sep='')
-    for (i in 1:top.n) {
-        name <- topUp[i]$pathway
-        if (use.description == FALSE)
-            descr <- unique(bm.go.annot[bm.go.annot$go_id == name, "name_1006"])
-        else
-            descr <- name
-        cat(i, descr, file=out.file, '\n', sep='\t', append=TRUE)
-        #print(name)
-        #out.png <- paste(out.dir, '/', out.name, '.topUp', i, '.enrichment.png', sep='')
-        out.png <- sprintf("%s/%s.topUp.%03d.enrichment.png", 
-        	out.dir, out.name, i)
-        out.plt <-
-            plotEnrichment(pathways.go[[ name ]] , ranks) +
-            labs(title=descr)
-        ggsave(out.png, out.plt)
-    }
-    out.file <- paste(out.dir, "/topDn.", top.n, '.txt', sep='')
-    for (i in 1:top.n) {
-        name <- topDown[i]$pathway
-        if (use.description == FALSE)
-            descr <- unique(bm.go.annot[bm.go.annot$go_id == name, "name_1006"])
-        else
-            descr <- name
-        cat(i, descr, file=out.file, '\n', sep='\t', append=TRUE)
-        #print(name)
-        #out.png <- paste(out.dir, '/', out.name, '.topDown', i, '.enrichment.png', sep='')
-        out.png <- sprintf("%s/%s.topDn.%03d.enrichment.png", 
-        	out.dir, out.name, i)
-        out.plt <-
-            plotEnrichment(pathways.go[[ name ]] , ranks) +
-            labs(title=descr)
-        ggsave(out.png, out.plt)
-    }
-
-    out.png <- paste(out.dir, '/', out.name, '.GSEAtable.png', sep='')
-    as.png(
-        plotGseaTable(pathways.go[topPathways$pathway], 
-                      ranks, 
-                      fgseaRes, 
-                      gseaParam = 0.5)
-    , out.png, width=1024, height=100*top.n, overwrite=TRUE)
-    
-    
-    # and now do a plot of the interest in citations during
-    # the last ten years for the top 5 sets
-    out.png <- paste(out.dir, '/', out.name, '.EUPMC.png', sep='')
-    cur.year <- as.integer(format(Sys.Date(), "%Y"))
-    terms <- topDown[1:top.biblio]$pathway
-    as.png(
-        pmcplot(terms, (cur.year-10):cur.year, proportion=FALSE),
-        out.png)
-
-    
-    # finally, return fgseaRes
-    return(fgseaRes)
-}
-
-
-
 GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc, 
-		     		 max.size=250,
-                      out.dir=paste(folder, 'go_cProf', sep='/'), 
-                      out.name='GO_cProf',
+		     		  max.size=250,
+                      out.dir=paste(folder, 'cProf', sep='/'), 
+                      out.name='cProf',
                       use.description=TRUE,
                       OrgDb = NULL,
                       kegg_organism = NULL,			# (cjo = coturnix japonica)
@@ -2905,9 +2739,28 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
     
 	if (! is.null(OrgDb)){
 	
-		gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-    	if (VERBOSE) cat("Doing GO GSEA with Cluster profiler\n")
-    	if ( ! file.exists(gse.out.file) ) {
+		gse.out.file <- paste(out.dir, '/', out.name, '.topGO.RData', sep='')
+        gse.raw.out.file <- paste(out.dir, '/', out.name, '.raw_p.topGO.RData', sep='')
+    	
+		if (VERBOSE) cat("Doing GO GSEA with Cluster profiler\n")
+    	
+		if (file.exists(gse.out.file)) {
+            
+			# Default is adjusted p
+            gse <- readRDS(gse.out.file)
+			out.base <- out.name
+			
+		} else if (file.exists(gse.raw.out.file)) {
+
+            # try with raw p data 
+            gse <- readRDS(gse.raw.out.file)
+            out.base <- paste(out.name, '.raw_p', sep='')
+			gse.out.file <- gse.raw.out.file
+        
+		} else {
+            # use an empty table so next check can be done
+            gse <- table(c())
+		
         	gse <- gseGO(geneList=s.ranks, 
                     	 ont ="ALL", 
                     	 keyType = "ENTREZID", 
@@ -2918,7 +2771,10 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
                     	 OrgDb = OrgDb, 
                     	 pAdjustMethod = "fdr")
                     	 #pAdjustMethod = "none")
-        	if (dim(gse)[1] == 0) {
+        	
+				out.base <- out.name
+			
+			if (dim(gse)[1] == 0) {
             	# p.adjusting may have failed to produce any result:
             	# Try without correction issuing a warning
             	gse <- gseGO(geneList=s.ranks, 
@@ -2931,30 +2787,18 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
                     	 OrgDb = OrgDb, 
                     	 #pAdjustMethod = "fdr")
                     	 pAdjustMethod = "none")
-            	out.name <- paste(out.name, '.raw_p', sep='')
+						 
+            	out.base <- paste(out.name, '.raw_p', sep='')
+				gse.out.file <- gse.raw.out.file
         	}
+			
         	if (dim(gse)[1] > 1) {
-            	saveRDS(gse, file=gse.out.file)
-            	gse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
+            	saveRDS(gse, file = gse.out.file)
+            	gse.tab.file <- paste(out.dir, '/', out.base, '.topGO.tab', sep='')
             	write.table(gse, file = gse.tab.file, row.names = T, col.names=T, sep='\t')
         	}
-    	} else {
-        	if (file.exists(gse.out.file)) {
-            	# default is adjusted p
-            	gse <- readRDS(gse.out.file)
-        	
-			} else {
-            	# try raw p
-            	out.name <- paste(out.name, '.raw_p', sep='')
-            	gse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-            	if (file.exists(gse.out.file)) {
-                	gse <- readRDS(gse.out.file)
-            	} else {
-                	# use an empty table so next check can be done
-                	gse <- table(c())
-            	}
-        	}
     	}
+		
     	# if dim(gse)[1] == 0 then we won't save anything
     	#	hopefully, if re-run again it might work next time by chance
     	# else
@@ -2965,16 +2809,20 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# regulated and to which extent. The circle size is proportional to the
         	# size (the number of genes contained) of the group, and the color to the
         	# p-value.
-        	out.png <- paste(out.dir, '/', out.name, '.GOdotplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.GOdotplot.png', sep='')
         	as.png(
             	dotplot(gse, showCategory = top.n, split=".sign") + facet_grid(.~.sign)
             	, out.png)
-
-        	# **Enrichment map**: organizes terms in a network with edges 
+ 			
+			#dotplot(gse, showCategory = top.n, split=".sign",
+			#		label_format = 50, font.size = 10,
+			#		title = "GO Enrichment Analysis") + facet_grid(.~.sign)
+        
+			# **Enrichment map**: organizes terms in a network with edges 
         	# connecting overlapping gene sets (i.e. shows which gene sets contain common
         	# genes). Dot diameter represents the size of the gene set (the number of genes
         	# it contains) and color represents the adjusted probability.
-        	out.png <- paste(out.dir, '/', out.name, '.GOemmaplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.GOemmaplot.png', sep='')
         	as.png(
             	emapplot(pairwise_termsim(gse), showCategory = top.n)
             	, out.png)
@@ -2982,15 +2830,15 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# **Ridgeplot**: density plots grouped by gene set depicting
         	# the frequency of fold change values per gene within each set. Helps 
         	# interpret up/down-regulated pathways.
-        	out.png <- paste(out.dir, '/', out.name, '.GOridgeplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.GOridgeplot.png', sep='')
         	as.png(
-            	ridgeplot(gse) + labs(x = "enrichment distribution")
+            	ridgeplot(gse) + labs(x = "Enrichment distribution")
             	, out.png)
 
         	# **PubMed trend** of enriched terms
         	# Plots the number/proportion of publications trend based on 
         	# the query result from PubMed Central.
-        	out.png <- paste(out.dir, '/', out.name, '.GOpmcplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.GOpmcplot.png', sep='')
         	cur.year <- as.integer(format(Sys.Date(), "%Y"))
         	terms <- gse$Description[1:top.biblio]
         	as.png(
@@ -3012,7 +2860,7 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
 
             	# Use the `Gene Set` param for the index in the title, and as the value for geneSetId
             	out.png <- paste(out.dir, '/', 
-                    	out.name, '.GOgseaplot.', i, '.', gse$ID[i], '.png', sep='')
+                    	out.base, '.GOgseaplot.', i, '.', gse$ID[i], '.png', sep='')
             	as.png(
                 	gseaplot(gse, by = "all", title = gse$Description[i], geneSetID = i)
                 	, out.png)
@@ -3022,17 +2870,14 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
             	# which genes are involved in enriched pathways and genes that may belong to
             	# multiple annotation categories).
             	out.png <- paste(out.dir, '/', 
-                    	out.name, '.GOcnetplot.', i, '.', gse$ID[i], '.png', sep='')
+                    	out.base, '.GOcnetplot.', i, '.', gse$ID[i], '.png', sep='')
             	# categorySize can be either 'pvalue' or 'geneNum'
             	as.png(
                 	cnetplot(gse, categorySize="pvalue", foldChange=s.ranks, 
-                        	 showCategory=i)
+                        	 showCategory=i, cex_label_gene = 0.5)
                 	, out.png)
         	}
-        	#out.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
-        	out.file <- gse.out.file
-        	write.table(gse, file=gse.out.file, row.names=T, col.names=T, sep='\t')
-    	}
+      	}
     }
     
 	### K E G G annotation
@@ -3041,9 +2886,27 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
 	if (! is.null(kegg_organism)){
     	
 		if (VERBOSE) cat("Doing KEGG GSEA with ClusterProfiler\n")
-    	kse.out.file <- paste(out.dir, '/', out.name, '.topKEGG.tab', sep='')
+    	kse.out.file <- paste(out.dir, '/', out.name, '.topKEGG.RData', sep='')
+        kse.raw.out.file <- paste(out.dir, '/', out.name, '.raw_p.topKEGG.RData', sep='')
     	
-		if (! file.exists(kse.out.file)) {
+        if (file.exists(kse.out.file)) {
+		
+            # default is adjusted p
+            kse <- readRDS(kse.out.file)
+			out.base <- out.name
+			
+        } else if (file.exists(kse.raw.out.file)) {
+		
+            # try raw p
+            kse <- readRDS(kse.raw.out.file)
+           	out.base <- paste(out.name, '.raw_p', sep='')
+			kse.out.file <- kse.raw.out.file
+ 
+        } else {
+
+            # use an empty table so next check can be done
+            kse <- table(c())
+
         	kse <- gseKEGG(geneList     = s.ranks,
                 	   organism     = kegg_organism,
                 	   #nPerm        = 10000,
@@ -3053,6 +2916,8 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
                 	   pAdjustMethod = "fdr",
                 	   keyType       = "ncbi-geneid",
                 	   nPermSimple = 100000)
+			
+				out.base <- out.name
 
         	if (dim(kse)[1] == 0) {
             	# Try without correction issuing a warning
@@ -3065,28 +2930,15 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
                     	   pAdjustMethod = "none",
                     	   keyType       = "ncbi-geneid",
                     	   nPermSimple = 100000)
-            	out.name <- paste(out.name, 'raw_p', sep='')
-        	}
-        	if (dim(kse)[1] > 1) {
+						   
+            	out.base <- paste(out.name, '.raw_p', sep='')
+				kse.out.file <- kse.raw.out.file
+			}
+			
+			if (dim(kse)[1] > 1) {
             	saveRDS(kse, file = kse.out.file)
-            	kse.tab.file <- paste(out.dir, '/', out.name, '.topGO.tab', sep='')
-            	# save also as text for user access
-            	write.table(kse, file=kse.tab.file, row.names=T, col.names=T, sep='\t')
-        	}
-    	} else {
-        	if (file.exists(kse.out.file)) {
-            	# default is adjusted p
-            	kse <- readRDS(kse.out.file)
-        	} else {
-            	# try raw p
-            	out.name <- paste(out.name, '.raw_p', sep='')
-            	kse.out.file <- paste(out.dir, '/', out.name, '.topGO.Rdata', sep='')
-            	if (file.exists(kse.out.file)) {
-                	kse <- readRDS(kse.out.file)
-            	} else {
-                	# use an empty table so next check can be done
-                	kse <- table(c())
-            	}
+            	kse.tab.file <- paste(out.dir, '/', out.base, '.topKEGG.tab', sep='')
+            	write.table(kse, file=kse.tab.file, row.names = T, col.names=T, sep='\t')
         	}
     	}
     
@@ -3100,17 +2952,22 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# regulated and to which extent. The circle size is proportional to the
         	# size (the number of genes contained) of the group, and the color to the
         	# p-value.</p>
-        	out.png <- paste(out.dir, '/', out.name, '.KEGGdotplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.KEGGdotplot.png', sep='')
         	as.png( 
             	dotplot(kse, showCategory = top.n, title = "Enriched Pathways" , 
-                    	color = "p.adjust", split=".sign") + facet_grid(.~.sign)
+                    	color = "pvalue", split=".sign") + facet_grid(.~.sign)
             	, out.png)
+			
+			#dotplot(kse, showCategory = top.n, split=".sign", color = "pvalue", 
+			#		label_format = 50, font.size = 10,
+			#		title = "KEGG Enrichment Analysis") + facet_grid(.~.sign)
+        
 
         	# <p>B <strong>Enrichment map</strong>: organizes terms in a network with edges 
         	# connecting overlapping gene sets (i.e. shows which gene sets contain common
         	# genes). Dot diameter represents the size of the gene set (the number of genes
         	# it contains) and color represents the adjusted probability.</p>
-        	out.png <- paste(out.dir, '/', out.name, '.KEGGemmaplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.KEGGemmaplot.png', sep='')
         	as.png(
             	emapplot(pairwise_termsim(kse))
             	, out.png)
@@ -3121,26 +2978,28 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
         	# which genes are involved in enriched pathways and genes that may belong to
         	# multiple annotation categories).</p>
         	# categorySize can be either 'pvalue' or 'geneNum'
-        	out.png <- paste(out.dir, '/', out.name, '.KEGGcnetplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.KEGGcnetplot.png', sep='')
         	as.png(
-            	cnetplot(	kse, showCategory = top.n, categorySize = "p.adjust",
+            	cnetplot(	kse, showCategory = top.n, categorySize = "pvalue",
 							cex_label_gene = 0.5, foldChange = s.ranks)
             	, out.png)
 
         	# <p>C <strong>Ridgeplot</strong>: density plots grouped by gene set depicting
         	# the frequency of fold change values per gene within each set. Helps 
         	# interpret up/down-regulated pathways.</p>
-        	out.png <- paste(out.dir, '/', out.name, '.KEGGridgeplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.KEGGridgeplot.png', sep='')
         	as.png(
-            	ridgeplot(kse, showCategory = top.n, fill = "p.adjust") + labs(x = "enrichment distribution")
+            	ridgeplot(kse, showCategory = top.n, fill = "pvalue") + labs(x = "enrichment distribution")
             	, out.png)
-
-        	# PubMed trend of enriched terms
+ 			
+			#ridgeplot(kse, showCategory = top.n, fill = "pvalue") + labs(x = "enrichment distribution", font.size = 10, title = "KEGG Enrichment Analysis")
+        	
+			# PubMed trend of enriched terms
         	# 
         	# Plots the number/proportion of publications trend based on the query result
         	# from PubMed Central.
 
-        	out.png <- paste(out.dir, '/', out.name, '.KEGGpmcplot.png', sep='')
+        	out.png <- paste(out.dir, '/', out.base, '.KEGGpmcplot.png', sep='')
         	cur.year <- as.integer(format(Sys.Date(), "%Y"))
 	    	terms <- kse@result$Description[1:top.biblio]
 			as.png(
@@ -3166,7 +3025,7 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
             	# list of ranked genes. The ranking metric measures a gene’s 
             	# correlation with a phenotype.
             	out.png <- paste(out.dir, '/', 
-                	out.name, '.KEGGgseaplot.', i, '.', kse$ID[i], '.png', sep='')
+                	out.base, '.KEGGgseaplot.', i, '.', kse$ID[i], '.png', sep='')
             	as.png(
             	  gseaplot(kse, by = "all", title = kse$Description[i], geneSetID = i)
             	  , out.png)
@@ -3185,3 +3044,193 @@ GO_KEGG_clusterProfiler <- function(ann.shrunk.lfc,
     	}
 	}
 }
+
+
+
+# -------------------------------
+# Do Gene Set Enrichment Analysis
+# -------------------------------
+
+GO_fgsea <- function (ann.shrunk.lfc, 
+		      			max.size = 250,
+                      out.dir = paste(folder, 'go_fgsea', sep='/'), 
+                      out.name = 'fgsea',
+                      use.description = TRUE,
+                      top.n = 10,
+                      top.biblio = 5,
+                      verbose = FALSE,
+					  interactive = FALSE) {
+    
+	## Do GSEA on GO terms using fgsea
+
+    # Rank all genes on their fold change.
+    #	Here we exclude genes for which we have no EntrezID and
+    #	use shrunk LFC values
+    gseaDat <- filter(ann.shrunk.lfc, !is.na(ENTREZID))
+    #gseaDat <- filter(ann.shrunk.lfc, !is.na(GENEID))
+
+    ranks <- gseaDat$lfc
+    #names(ranks) <- gseaDat$ENTREZID
+    names(ranks) <- gseaDat$GENEID
+    head(ranks)
+    #uranks <- ranks[!duplicated(sort(names(ranks)))]
+
+    # Plot all the ranked fold changes
+    out.png <- paste(out.dir, '/', out.name, '.barplot.png', sep='')
+    as.png(barplot(sort(ranks, decreasing=T), ylab = "Log 2 Fold Change",
+					main = "Distribution of LFC",
+					xlab = "Genes", density = T,
+					cex.names = 0.5), out.png)
+    
+    # load pathways
+    #pathways <- ann.shrunk.lfc$ENTREZID
+    #pathways <- ann.shrunk.lfc$go_id
+    #names(pathways) <- gseaDat$ENTREZID
+    #names(pathways) <- gseaDat$GENEID
+    #upathways <- pathways[!duplicated(sort(names(pathway)))]
+    
+    # create a list of go_id terms where each term contains a vector
+    # of emsembl_gene_id in that term
+    #   first recover the annotation (in case we are re-run and do not
+    #   have it
+    if (verbose) cat("Loading GO table\n")
+    if ( ! exists(substitute(bm.go.annot)) ) {
+        bm.go.annot <- read.table(paste(folder, '/annotation/biomart.go.tab', sep=''), 
+	            header=T, sep='\t')
+    }
+    #if ( ! exists(substitute(bm.goslim.annot)) ) {
+    #    bm.goslim.annot <- read.table(paste(folder, '/biomart.goslim.tab', sep=''), 
+    #	            header=T, sep='\t')
+    #}
+
+    if (use.description == FALSE) {
+        # split() will divide the gene-ids by their go-id
+        pathways <- split(bm.go.annot$ensembl_gene_id, bm.go.annot$go_id)
+    } else {
+        # Do the same but with large gene ontology names
+        # split() will divide the gene-ids by their go-name
+        pathways.go <- split(bm.go.annot$ensembl_gene_id, bm.go.annot$name_1006)
+    }
+    # do analysis
+    # the resulting table contains enrichment scores and p-values
+    out.file <- sprintf("%s/go_fgsea_10-%d.RData", out.dir, max.size)
+    if (file.exists(out.file)) {
+        if (verbose) cat('Loading precomputed FGSEA data\n')
+        load(file=out.file)
+    } else {
+        if (verbose) cat('Computing and saving FGSEA data\n')
+        fgseaRes <- fgsea::fgsea(pathways=pathways.go, 
+                        		 stats=ranks, 
+				        		 minSize=10, 
+				        		 maxSize=max.size, 
+                        		 nPermSimple=100000,
+                        		 scoreType='std'
+                        		 )
+        save(fgseaRes, file=out.file)
+    }
+    if (verbose)
+        print(head(fgseaRes[order(padj, -abs(NES)), ], n=10))
+
+    if (interactive) {
+        # plot enrichment score
+        sorted.fgsea.res <- fgseaRes[order(padj, -abs(NES)), ]
+        sfr.names <- sorted.fgsea.res$pathway
+        for (i in 1:top.n) {
+            if (use.description == FALSE)
+                descr <- bm.go.annot[bm.go.annot$go_id == sfr.names[i], "name_1006"]
+            else
+                descr <- sfr.names[i]
+            print(
+                fgsea::plotEnrichment(pathways.go[[ sfr.names[i] ]], ranks) +
+                    labs(title=descr)
+                )
+            ans <- readline("Press RETURN to continue: ")
+            if (ans == "q") break
+        }
+    }
+    if (verbose) cat('Selecting top up- and down-regulated sets\n')
+    # gsea table plot of top.n gene families
+    #   top_n() is now deprecated
+    topUp <- fgseaRes %>%
+        filter(ES > 0) %>%
+        top_n(n = top.n, col="padj")
+
+    topDown <- fgseaRes %>%
+        filter(ES < 0) %>%
+        top_n(n = top.n, col="padj")
+
+    topPathways <- bind_rows(topUp, topDown) %>%
+        arrange(-ES)
+    # last resort when "pos" is used    
+    #topPathways <- sorted.fgsea.res[1:top.n, ]
+
+    # do the plots and save descriptions
+    if (verbose) cat('Plotting top up- and down-regulated sets\n')
+    out.file <- paste(out.dir, "/topUp.", top.n, '.txt', sep='')
+    
+	for (i in 1:dim(topUp)[1]) {
+        
+		name <- topUp$pathway[i]
+        
+		if (use.description == FALSE){
+            descr <- unique(bm.go.annot[bm.go.annot$go_id == name, "name_1006"])
+        } else {
+            descr <- name
+        }
+		cat(i, descr, file=out.file, '\n', sep='\t', append = TRUE)
+ 
+        #print(name)
+        #out.png <- paste(out.dir, '/', out.name, '.topUp', i, '.enrichment.png', sep='')
+        out.png <- sprintf("%s/%s.topUp.%03d.enrichment.png", 
+        	out.dir, out.name, i)
+        out.plt <-
+            fgsea::plotEnrichment(pathways.go[[ name ]] , ranks) +
+            labs(title=descr)
+        ggsave(out.png, out.plt)
+    }
+    
+	out.file <- paste(out.dir, "/topDn.", top.n, '.txt', sep='')
+    
+	for (i in 1:dim(topDown)[1]) {
+        
+		name <- topDown$pathway[i]
+		
+        if (use.description == FALSE)
+            descr <- unique(bm.go.annot[bm.go.annot$go_id == name, "name_1006"])
+        else
+            descr <- name
+        cat(i, descr, file=out.file, '\n', sep='\t', append=TRUE)
+        #print(name)
+        #out.png <- paste(out.dir, '/', out.name, '.topDown', i, '.enrichment.png', sep='')
+        out.png <- sprintf("%s/%s.topDn.%03d.enrichment.png", 
+        	out.dir, out.name, i)
+        out.plt <-
+            fgsea::plotEnrichment(pathways.go[[ name ]] , ranks) +
+            labs(title=descr)
+        ggsave(out.png, out.plt)
+    }
+
+    out.png <- paste(out.dir, '/', out.name, '.GSEAtable.png', sep='')
+    as.png(
+        fgsea::plotGseaTable(pathways.go[topPathways$pathway], 
+                      ranks, 
+                      fgseaRes, 
+                      gseaParam = 0.5)
+    , out.png, width=1024, height=100*top.n, overwrite=TRUE)
+    
+    
+    # and now do a plot of the interest in citations during
+    # the last ten years for the top 5 sets
+    if (verbose) cat('Getting and plotting PubMed citations\n')
+    out.png <- paste(out.dir, '/', out.name, '.EUPMC.png', sep='')
+    cur.year <- as.integer(format(Sys.Date(), "%Y"))
+    terms <- topPathways$pathway[1:top.biblio]
+    as.png(
+        pmcplot(terms, (cur.year-10):(cur.year-1), proportion=FALSE),
+        out.png)
+
+    
+    # finally, return fgseaRes
+    return(fgseaRes)
+}
+

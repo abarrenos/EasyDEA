@@ -66,10 +66,11 @@ getScriptPath <- function()
 
 # get my location
 #mydir <- dirname(getScriptPath())
-source(paste("lib", "Rbase_tools.R", sep='/'))
+my.dir <- '.'
+source(paste(my.dir, "lib", "Rbase_tools.R", sep='/'))
 # inside my location there should be a 'lib' directory with the needed
 # auxiliary scripts: we'll source them all
-sourceDir(paste("lib", sep='/'), VERBOSE = F)
+sourceDir(paste(my.dir, "lib", sep='/'), VERBOSE = F)
 
 
 use.package("optparse")
@@ -109,10 +110,10 @@ use.package("pathview")
 use.package("tcltk")
 use.package("gWidgets2")
 
-
+# Parser arguments
 options <- get.options()
 
-# for convenience, we will assign options to specific names
+# For convenience, we will assign options to specific names
 #	we could get a similar efect if instead of a list, options
 #	were a data.frame and then it would suffice to use attch()
 #	but this makes it evident which variables correspond to 
@@ -156,14 +157,13 @@ by.columns=2
 #
 ##############################################################################
 
-
 short.title('EasyDEA: RNA-Seq Analysis')		# Print a visible title
 
+# Generate Output Directory Hierarchy
 folder <- create.output.hierarchy(rnaseq.out, use.both.reads=BOTH)
 
-# next are for reproducibility
-
-# make a copy of the metadata into the rnaseq folder
+# To ensure reproducibility, make a copy of the metadata
+# into the output rnaseq folder
 system(paste("cp", metadata, rnaseq.out))
 system(paste("cp", metadata, folder))
 # this could give problem if we are run on our installation folder for
@@ -708,13 +708,14 @@ if (USE.DESEQ2) {
         saveRDS(dds, file = paste(out.base, "rds", sep='.'))
     }
 	
-	# Do some diagnostic plots: PCA
-	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_PCA_plot.png" sep='')
-	as.png(plotPCA(varianceStabilizingTransformation(dds), intgroup = design.column),
+	# Do some diagnostic plots - PCA
+	vst <- varianceStabilizingTransformation(dds)
+	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_PCA_plot.png", sep='')
+	as.png(plotPCA(vst, intgroup = design.column),
         	out.png)
 	
 	# Plot Dispersion Estimates
-	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_DispEstimates.png" sep='')
+	out.png <- paste(folder, "/DESeq2/img/dds.DESeq2.", design.column, "_DispEstimates.png", sep='')
 	as.png(plotDispEsts(dds, main = "DESeq2 Per-gene Dispersion Estimates"),
         	out.png)
 	
@@ -722,61 +723,75 @@ if (USE.DESEQ2) {
     cat("\n\tDESeq2 analysis produced the following models\n\n")
     print(resultsNames(dds))
 	
+	
 	## Perform all pairwise comparisons available in DESeq2 model
+	## DDS objects only include comparisons that take the first level
+	## of the design column as reference.
+	## If we wan to do all possible comparisons, we need to relevel.
 	
-	comparisons <- resultsNames(dds)[2:length(resultsNames(dds))]
 	dds.results <- list()
-
-	for (comparison in comparisons){
-		if (comparison == "Intercept") next
-		
-        cat("\n                                    ")						
-		cat("\nComputing DGE:",	  comparison,	"\n")
-		cat(  "==================================\n")
-
-		contrast <- str_split(comparison, pattern = "_")[[1]][c(1, 2, 4)]	#Ex: c("Sample", "DF1.PC", "DF1")
-
-		out.file.base <- paste("dds", comparison, sep = ".")				#Ex: "dds.Sample.DF1_PC.vs.DF1"
-		
-		# Perform comparison, shrinkage, annotate and identify significant changes.
-		dds.results[[comparison]] <- analysePlotDESeq(
-							dds = dds,
-							contrast = contrast,
-							filterFun = ihw,
-							alpha = 0.01,
-							shrnk.type = 'apeglm',
-							annotate = TRUE, 
-							ensembl.db = ens.db,
-							biomart.db = bm.annot.1,
-							org.db = org.db,
-							annotation.dir = paste(folder, "annotation", sep = "/"),
-							save = TRUE,
-							out.file.base = out.file.base,
-							out.dir = folder)
+	levels <- levels(dds[[design.column]])	
 	
-		if (VERBOSE) dds.results[[comparison]]$result.ann %>% head(10)
+	for (ref in levels) {
+
+		# Relevel
+		dds$sample <- relevel(dds$sample, ref)
+		dds <- DESeq(dds)
+		
+		# All comparisons for that reference
+		comparisons <- resultsNames(dds)[2:length(resultsNames(dds))]
+
+		for (comparison in comparisons){
+			if (comparison == "Intercept") next
+
+        	cat("\n                                    ")						
+			cat("\nComputing DGE:",	  comparison,	"\n")
+			cat(  "==================================\n")
+
+			contrast <- str_split(comparison, pattern = "_")[[1]][c(1, 2, 4)]	#Ex: c("Sample", "DF1.PC", "DF1")
+
+			out.file.base <- paste("dds", comparison, sep = ".")				#Ex: "dds.Sample.DF1_PC.vs.DF1"
+
+			# Perform comparison, shrinkage, annotate and identify significant changes.
+			dds.results[[comparison]] <- analysePlotDESeq(
+								dds = dds,
+								contrast = contrast,
+								filterFun = ihw,
+								alpha = 0.01,
+								shrnk.type = 'apeglm',
+								annotate = TRUE, 
+								ensembl.db = ens.db,
+								biomart.db = bm.annot.1,
+								org.db = org.db,
+								annotation.dir = paste(folder, "annotation", sep = "/"),
+								save = TRUE,
+								out.file.base = out.file.base,
+								out.dir = folder)
+
+			if (VERBOSE) dds.results[[comparison]]$result.ann %>% head(10)
+		}
 	}
-	
+
     #annot <- ds2.get.annotation.ens.org(dds, ens.db, org.db)
     #ens.ann <- annot$ens.ann		### NOTE we could use attach here
     #ens.ann.1 <- annot$ens.ann.1	# but this is more explicit
     #geneSymbols <- annot$geneSymbols
     #go.ann <- annot$go.ann
     #GOdescription <- annot$GOdescription
-    
+
     # Add annotation to dds to keep everything in one place
     #dds$ens.annot.1 <- ens.ann.1
     #dds$bm.annot.1 <- bm.annot.1
 
-    
+
     # Now result list contains annotation of EnsemblDB, BiomaRt and ORG.Db (if provided)
 	# Org.DB packages are not available for all organisms, so by default, is set to NULL.
-	
+
 	if (FALSE){
 	if ( ! is.null(org.db) ) {
 
 		for (res in names(dds.results)){
-			
+
 			res.ann <- dds.results[[res]]$result.ann
 
 			# And now we should be able to use the Org package if we successfully built it
@@ -802,7 +817,7 @@ if (USE.DESEQ2) {
 							keys = ncbi.ann$GO, 
 							columns = c(	"GOID", "TERM", "DEFINITION", "ONTOLOGY"),
 							keytype = "GOID")
-							
+
 			for (i in colnames(GO.id)){
 				go.ann[i] <- Go.id[match(res.ann$gene.id, ensembl.ann[,by]), i]
 			}	
@@ -859,7 +874,7 @@ if (USE.DESEQ2) {
     #        #stop()
     #    }
     #}
-	
+
     if (INTERACTIVE) {
         ds2.interactively.print.n.most.significant.de.genes(dds.results, n=10)
 
@@ -872,23 +887,30 @@ if (USE.DESEQ2) {
     # -------------------------------
     # Do Gene Set Enrichment Analysis
     # -------------------------------
-	
+
 	short.title('Gene Set Enrichment Analysis')
 
 	ds.data <- dds.results
-    
+
 	# For GSEA, we need to define a maximum number of genes we want to include per group
 	# when performing clustering. For large groups, the ontology will be hierarchically 
 	# superior and the functions retrieved will be generic. In contrastm, for small groups,
 	# the ontology will be more specific.
-	#
 	# We do not know what is the best upper limit, so we'll try several
 
+	########################
+	#   CLUSTER PROFILER   #
+	########################
+
     for (ms in c(50, 100, 250, 500)) {
-        for (cmp.name in names(ds.data)) {
-            # for each comparison name
+	#for (ms in c(5)) {
+		for (cmp.name in names(ds.data)) {
+			
+			if (str_detect(cmp.name, "_vs_DF1$")) next
+            
+			# for each comparison name
             cmp.data <- ds.data[[ cmp.name ]]
-            cat('Doing GSEA on', cmp.name, '\n')
+        	cat('\n\nDoing Enrichment with clusterProfiler on', cmp.name, '\n') 
             ann.shrunk.lfc <- cmp.data[[ "shrunk.ann" ]] %>% as.data.frame()
 
     #        #ms <- 500 
@@ -906,22 +928,49 @@ if (USE.DESEQ2) {
 
             out.dir <- sprintf("%s/DESeq2/GO+KEGG_cProf/max.size=%03d/%s",
                     folder, ms, cmp.name)
-            dir.create(out.dir, showWarning=FALSE, recursive=TRUE)
-						  
-						  
+            dir.create(out.dir, showWarning = FALSE, recursive = TRUE)
+
+
 			GO_KEGG_clusterProfiler(ann.shrunk.lfc = ann.shrunk.lfc,
 									max.size = ms,
 									out.dir = out.dir, 
-									out.name = 'GO_cProf',
+									out.name = 'cProf',
 						  			use.description = TRUE,
 						  			OrgDb = org.db,
 									kegg_organism = "gga",	### ADRIAN : Create Option
 						  			top.n = 10,
 									#n.categories = 10,		### ADRIAN : Create Option
 						  			top.biblio = 5,
-						  			verbose = FALSE)
+						  			verbose = VERBOSE)
 		}
     }
+
+
+	#####################
+	#   FGSEA PACKAGE   #
+	#####################
+
+	for (ms in c(50, 100, 250, 500)) {
+    	for (cmp.name in names(ds.data)) {
+        	# for each comparison name
+        	cmp.data <- ds.data[[ cmp.name ]]
+        	cat('\n\nDoing Enrichment with FGSEA on', cmp.name, '\n') 
+        	ann.shrunk.lfc <- cmp.data[[ "shrunk.ann" ]] %>% as.data.frame()
+
+        	#out.dir <- paste(folder, "DESeq2/GO_fgsea", cmp.name, sep='/')
+        	out.dir <- sprintf("%s/DESeq2/GO_fgsea/max.size=%03d/%s", folder, ms, cmp.name)
+        	dir.create(out.dir, showWarning = FALSE, recursive = TRUE)
+
+        	gogsea <- GO_fgsea(ann.shrunk.lfc, 
+                	   max.size = ms,
+                	   out.dir = out.dir, 
+                	   out.name = 'fgsea',
+                	   use.description = TRUE,
+                       top.n = 10,
+                       top.biblio = 5,
+                	   verbose = VERBOSE)
+     	}
+	}
 
 
     # -------------------------
@@ -1328,6 +1377,75 @@ if (USE.DESEQ2) {
     }
 
 }
+
+
+    # ---------------------------------------- #
+    # GENERATE HTML REPORT FOR clusterProfiler #
+    # ---------------------------------------- #
+
+    ## Run the Bash script to generate HTML index files
+
+report.scr <- paste(my.dir, 'lib', "report", sep="/")
+wd <- getwd()
+
+cat("\n\tGenerating HTML Report for clusterProfiler\n\n")
+
+cProf.dir <- paste(folder, "DESeq2", "GO+KEGG_cProf", sep = "/")
+
+for (size.dir in list.dirs(cProf.dir, recursive = F, full.names = T)) {
+	
+    grp.size <- basename(size.dir)
+	cat("\n\tGene Set", grp.size, "\n")
+	cat(  "\t=====================")
+    for (sample.dir in list.dirs(size.dir, recursive = F, full.names = T)) {
+    
+    	sample <- basename(sample.dir)
+        cat("\n",sample, "\n\n", sep = "")
+
+        setwd(sample.dir)
+		system(paste("bash ", wd, '/', report.scr, "/make-clusterprof-index.sh", sep = ""))
+		file.copy(paste(wd, '/', report.scr, "/style.css", sep = ""), ".")
+		setwd(wd)
+    }
+}
+
+
+    # ------------------------------ #
+    # GENERATE HTML REPORT FOR FGSEA #
+    # ------------------------------ #
+
+    ## Run the Bash script to generate HTML index files
+
+report.scr <- paste(my.dir, 'lib', "report", sep="/")
+wd <- getwd()
+
+cat("\n\tGenerating HTML Report for FGSEA\n\n")
+
+fgsea.dir <- paste(folder, "DESeq2", "GO_fgsea", sep = "/")
+
+for (size.dir in list.dirs(fgsea.dir, recursive = F, full.names = T)) {
+	
+    grp.size <- basename(size.dir)
+	cat("\n\tGene Set", grp.size, "\n")
+	cat(  "\t=====================")
+    for (sample.dir in list.dirs(size.dir, recursive = F, full.names = T)) {
+    
+    	sample <- basename(sample.dir)
+        cat("\n",sample, "\n\n", sep = "")
+
+        setwd(sample.dir)
+		system(paste("bash ", wd, '/', report.scr, "/make-fgsea-index.sh", sep = ""))
+		file.copy(paste(wd, '/', report.scr, "/style.css", sep = ""), ".")
+		setwd(wd)
+    }
+	
+	setwd(size.dir)
+	system(paste("bash ", wd, '/', report.scr, "/rename-to-export.sh", sep = ""))
+	file.copy(paste(wd, '/', report.scr, "/style.css", sep = ""), ".")
+	setwd(wd)
+}
+
+
 
 while (sink.number() > 0) sink()
 

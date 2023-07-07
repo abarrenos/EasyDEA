@@ -38,7 +38,7 @@ get.options <- function()
     # I am torn between having a directory-based one or a global
     # per-user (in $HOME) one. Maybe we should try both?
     #default.config.file <- '~/.rnaseq.rc'
-    default.config.file <- '.rnaseq.rc'
+    default.config.file <- '.EasyDEA.rc'
     # it should be formatted as option=value
     # with comment starting with a #
     # therefore it would be a valid R input file

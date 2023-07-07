@@ -84,7 +84,7 @@ annotateDESeqResults <- function(results,
 
 	## Save annotated results as data frame (table)
 	if (save){
-		write.table(data.frame(res.ann),
+		write.table(data.frame(res.ann), sep = "\t",
 					file = paste(out.dir, '/DESeq2/', out.file.base, '_ann_results.tab', sep = ''),
 					row.names = TRUE, col.names = TRUE)
 
@@ -154,9 +154,11 @@ ddsCompareAnnotate <- function(	dds,
 # 3) IDENTIFY TOP N DIFFERENTIALLY EXPRESSED GENES
 top_n <- function(ds, n, col = "padj", decreasing = F) {
 	
-	df <- data.frame(ds)
-	ordered.idx <- order(abs(df[col]), decreasing = decreasing)
+	df <- as.data.frame(ds)
+	ordered.idx <- order(abs(df[,col]), decreasing = T)
 	ordered.df <- df[ordered.idx, ]
+	
+	if (dim(ordered.df)[1] < n) n <- dim(ordered.df)[1]
 	top.n <- ordered.df[1:n, ]
 	
 	return(top.n)
