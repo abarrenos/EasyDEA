@@ -1,7 +1,8 @@
 get.options <- function()
 {
-    # set original default values
+	## 1) Default values for EasyDEA
     # we could set them as argument 'default' in make_option()
+	
     ALIGN 					<- FALSE
     BOTH 					<- TRUE
     USE.ONLINE.ANNOTATION 	<- TRUE
@@ -14,6 +15,7 @@ get.options <- function()
     ens.version 			<- '106'
     mart.name 				<- 'ggallus_gene_ensembl'
     org.package 			<- "org.Gg.eg.db"
+	kegg.organism			<- "gga"
     n.genes 				<- 1000
     fastq.dir 				<- 'fastq_dir'
     alignment.dir 			<- 'STAR-aln'
@@ -31,37 +33,40 @@ get.options <- function()
     INTERACTIVE 			<- FALSE
     VERBOSE 				<- TRUE
 
-
-    # this is a default options file that the user may have with
+	## 2) User-defined default values file defined by the user
+	#
+    # This is a default options file that the user may have with
     # base options that will be used to override the arbitrary
     # defaults we have defined here
-    # I am torn between having a directory-based one or a global
-    # per-user (in $HOME) one. Maybe we should try both?
-    #default.config.file <- '~/.rnaseq.rc'
+	
     default.config.file <- '.EasyDEA.rc'
-    # it should be formatted as option=value
+    
+	# It should be formatted as option=value
     # with comment starting with a #
     # therefore it would be a valid R input file
 
-    # check if there is a user-defined global default options file that
-    # will override global defaults
+    # Check if there is a user-defined global default options file that
+    # will override global defaults within the user HOME directory 
     if (file.exists(paste('~/', default.config.file, sep='')))
         source(paste('~/', default.config.file, sep=''))
-    # check if there is a per-directory user-defined default options file
-    # that will override global and user-global defaults
-    if (file.exists(paste('../', default.config.file)))
-        source(paste('../', default.config.file))
+		
+    # Check if there is a user-defined default options file within the
+    # EasyDEA installation directory
+    if (file.exists(paste('../', default.config.file, sep = "")))
+        source(paste('../', default.config.file, sep = ""))
 
+###############################################################################
 
-    # first define all the known options
+    # Now we define all the command line options
     # we do not want to overwrite values not specified in the command line,
     # for that we need to be able to tell which values were not specified,
     # and this is easier if we leave all options with their default value
     # as NULL (by leaving it unspecified)
-    option_list <- list(
+    
+	option_list <- list(
+	
         #-h / --help is added by default
 
-        # options for basic setup
         make_option(c("-A", "--align"), 
             action="store_true", 
             help=paste("whether to align fastq reads to the reference [default", ALIGN, "]")),
@@ -110,7 +115,11 @@ get.options <- function()
             type="character", 
             help=paste("the name of the Org package to use for annotation[default", org.package, "]")),
 
-        make_option(c("-n", "--n-genes"), 
+       make_option(c("-K", "--KEGG-organism"), 
+            type="character", 
+            help=paste("the KEGG basename of the target organism (e.g. 'hsa', 'gga', 'cja') [default", kegg.organism, "]")),
+
+       make_option(c("-n", "--n-genes"), 
             type="integer", 
             help=paste("the maximum number of top genes to save [default", n.genes, "]")),
 
@@ -173,7 +182,6 @@ get.options <- function()
        make_option(c("--config-file"), 
             type="character", 
             help=paste("configuration file with option=value definitions [default", config.file, "]"))
-
     )
     
     # get command line options, if help option encountered print help and exit,
@@ -181,35 +189,44 @@ get.options <- function()
     parser <- OptionParser(option_list=option_list)
     opt <- parse_args(parser, convert_hyphens_to_underscores=TRUE)
 
-    # check if a config file was specified in the command line, and
+
+    ## User-defined configutaion file with arguments and options
+	# Check if a config file was specified in the command line, and
     # source it before assigning the other command line variables
+	
     if (! is.null(opt$config_file)) source(opt$config_file)
 
-    # command-line options will take precedence over any file-defined options
-    # -- even options from a file specified in the command line
-    # the criterion we use is one of visibility:
-    #	global options defined here (global, in this function) are opaque
+    # Command-line options will take precedence over any file-defined options
+    # The order of priority is, from lowest to highest:
+    #
+	#	1)Global options defined here (global, in this function) are opaque
     #		to the user
-    #	user-defined options specified at the global ($HOME) level have
+    #
+	#	2)User-defined options specified at the global ($HOME) level have
     #		been set by the user but are "invisible" (hidden file)
-    #	user-defined options specified at a directory level are more specific
+    #
+	#	3)User-defined options specified at a directory level are more specific
     # 		and apply only when we run in that directory, we expect them
     #		to have been written more recently and be better remembered
     #		by the user, but they are still in a hidden file
-    #	user-defined options in a file specified in the command line will 
+    #
+	#	4)User-defined options in a file specified in the command line will 
     #		typically be used to reduce command line length, the file will
     #		likely not be a hidden file, they will enjoy permanence, but 
     #		the contents will be visible only when the file is displayed, 
     #		otherwise they must be remembered
-    #	command-line options are always evident, and are impermanent, so
+    #
+	#	5) Command-line options are always evident, and are impermanent, so
     #		we assume that the user resorts to them for volatile changes and
     # 		tests when s/he wants to override other existing defaults
-    # this defines, in fact, a hierarchy of precedence
-    #	command-line > command-line-file > per-directory-defaults >
-    #	user-global-defaults > program-generic-defaults
+    #
+	#	Hierarchy of options:
+    #	1.Command-line-options > 2.Command-line-file >
+	#	3.User-defaults(HOME dir) > 4.User-defaults(EasyDEA dir) >
+	#	5.Global-defaults
     #		
     
-    # now, set any options given in the command line to override
+    # Now, set any options given in the command line to override
     # default or config file values
     # we  know they were given in the command line if they are not NULL
     if (! is.null(opt$align)) ALIGN <- opt$align
@@ -224,6 +241,7 @@ get.options <- function()
     if (! is.null(opt$ENSEMBL_version)) ens.version <- opt$ENSEMBL_version
     if (! is.null(opt$mart_name)) mart.name <- opt$mart_name
     if (! is.null(opt$Org_package)) org.package <- opt$Org_package
+	if (! is.null(opt$KEGG_organism)) kegg.organism <- opt$KEGG_organism
     if (! is.null(opt$n_genes)) n.genes <- opt$n_genes
     if (! is.null(opt$fastq_dir)) fastq.dir <- opt$fastq_dir
     if (! is.null(opt$alignment_dir)) alignment.data <- opt$alignment_dir
@@ -254,6 +272,7 @@ get.options <- function()
                    ens.version=ens.version,
                    mart.name=mart.name,
                    org.package=org.package,
+				   kegg.organism = kegg.organism,
                    n.genes=n.genes,
                    fastq.dir=fastq.dir,
                    alignment.dir=alignment.dir,

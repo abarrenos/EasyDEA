@@ -1,5 +1,4 @@
 
-
 #' getScriptPath()
 #'
 #' Get the name of the main script being run. This is FAR from ideal: it relies

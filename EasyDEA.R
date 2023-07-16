@@ -130,6 +130,7 @@ target.organism <-        options$target.organism
 ens.version <-            options$ens.version	# version of ENSEMBL to use
 mart.name <-              options$mart.name      # mart from BiomaRt to use
 org.package <-            options$org.package
+kegg.organism <-		  options$kegg.organism
 n.genes <-                options$n.genes		# number of top genes to revise
 fastq.dir <-              options$fastq.dir     # directory with fastq files
 alignment.dir <-          options$alignment.dir
@@ -937,9 +938,8 @@ if (USE.DESEQ2) {
 									out.name = 'cProf',
 						  			use.description = TRUE,
 						  			OrgDb = org.db,
-									kegg_organism = "gga",	### ADRIAN : Create Option
+									kegg_organism = kegg.organism,
 						  			top.n = 10,
-									#n.categories = 10,		### ADRIAN : Create Option
 						  			top.biblio = 5,
 						  			verbose = VERBOSE)
 		}
@@ -1002,34 +1002,40 @@ if (USE.DESEQ2) {
 
     # This is here in case we decide to loop over several columns later 
     contrasts.column <- design.column
-    references <- levels(colData[ , contrasts.column ])
+    references <- levels(as.factor(colData[ , contrasts.column ]))
 
     for (ref in references) {
-        # Find genes that change w.r.t. the reference strain
 
-        # create a convenience text variable to simplify/unify filenames below
+        # Find all the genes common to all samples
+		
+		# Create a convenience text variable to simplify/unify filenames below
         ccol_ref <- paste(contrasts.column, ref, sep='_')
 
-        # find all the genes common to all samples
-        name <- paste(ccol_ref, levels(as.factor(target[ , contrasts.column]))[1], sep='_')
-        common <- rownames(ds.data[[name]]$signif)
-        for (i in levels(as.factor(target[ , contrasts.column]))) {
+        # First define all genes detected in results
+        common <- rownames(ds.data[[1]]$result.ann)
+        
+		# Now find common genes for all comparisons 
+		for (i in references) {
             if (i == ref) next
-            name <- paste(ccol_ref, i, sep='_')
+            name <- paste(ccol_ref, "vs", i, sep='_')
             print(name)
             common <- intersect(common, rownames(ds.data[[name]]$signif))
+			#print(length(common))
         }
-        length(common)	# 681 in Coturnix, 1670 in Gallus
+        cat(paste("\n\t", length(common), "common genes detected\n\n"))
 
-        data.table <- data.frame(genes=common)
-        # compare all against all other samples
-        for (i in levels(as.factor(target[ , contrasts.column]))) {
+		# Create data table with common genes
+        data.table <- data.frame(genes = common)
+        rownames(data.table) <- common
+
+		# Extract LFC values for each comparison and
+		# add it to the common genes table
+        
+		for (i in references) {
             if (i == ref) next
-            name <- paste(ccol_ref, i, sep='_')
-            print(name)
+            name <- paste(ccol_ref, "vs", i, sep='_')
             data.table[name] <- ds.data[[name]]$signif[common, "log2FoldChange"]
         }
-        rownames(data.table) <- common
 
         data.annot <- ds.data[[name]]$signif.annot[common, ]
 
@@ -1040,13 +1046,15 @@ if (USE.DESEQ2) {
         # First have a general look at the methods to get a feeling for the
         # best number of clusters
 
-
         dif <- data.table[ , -1]
         by.row <- 1
         by.col <- 2
+		
+		# Normalize LFC by calculating Z-score (x-mea)
         means <- apply(dif, by.col, mean)
         sds <- apply(dif, by.col, sd)
-        nor <- scale(dif,center=means,scale=sds)
+        nor <- scale(dif,center = means,scale = sds)
+		
         if (INTERACTIVE) {
             # Do a scatterplot matrix
             car::scatterplotMatrix(dif)
@@ -1059,18 +1067,17 @@ if (USE.DESEQ2) {
                 }, out.png)
 
 
-        # Try to guess the optimum number of K-means clusters
-        # NBClust
+        # Try to guess the optimum number of K-means clusters with NBClust
         out.log <- paste(folder, "/DESeq2/cluster/NBClust_", ccol_ref, ".log", sep='')
         openlog(out.log)
-        #library("NbClust")
-        # predict best number of clusters for hierarchical and k-means clustering
+
+        # NbClust helps us predict best number of clusters using
+		# Hubert index and D index
         nbc <- NbClust(dif, diss=NULL, 
                 distance="euclidean", method="complete", 
                 min.nc=3, max.nc=10, 
                 index="all", alphaBeale=0.1)
-        # 4 for the C. japonica wt vs others data
-        # 5 for G. gallus wt vs infected.data
+
         sink()
 
 
@@ -1080,7 +1087,7 @@ if (USE.DESEQ2) {
                          ccol_ref, ".log", sep='')
         openlog(out.log)
         for (i in 2:10) {
-            cat("Clustering with K-means (", i, " clusters)\n")
+            cat("\n\tClustering with K-means (", i, " clusters)\n\n", sep = "")
             cl <- kmeans(nor, i)				# NOTE: nor
             print(table(cl$cluster))
             print(fviz_cluster(cl, geom = "point", data=nor))
