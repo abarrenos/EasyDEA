@@ -32,7 +32,7 @@ Even though _EasyDEA_ contains a set of default parameters for the analysis pipe
 An example configuration file containing all available command line options and parameter values can be found [here](data/config_file.txt).
 
 
-#### Contact details
+### Contact details
 For more information regarding _EasyDEA_ functioning and  problem reporting, please do not hesitate to contact me.
 - [adrian.barreno@alumnos.upm.es](mailto:adrian.barreno@alumnos.upm.es)
 - [linkedIn](https://www.linkedin.com/in/adri%C3%A1n-barreno-s%C3%A1nchez-890a45206/)
