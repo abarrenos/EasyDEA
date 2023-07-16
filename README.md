@@ -23,10 +23,10 @@ _Image generated with Biorender.com_
 To run the program, clone or download the repository onto your local device, within the desired installation path. To initiate the analysis, execute the main script ```easyDEA.R``` followed by custom command-line options and parameter values. Alternatively, users can provide as input a configuration text file containing a list of options and parameter values for the analysis. For more information about the available program options and default parameters, run the program followed by the option ```--help```.
 
 ```
-./easyDEA.R [--OPTIONS] [VALUES] [-h/--help] --config-file [filepath]
+./EasyDEA.R [--OPTIONS] [VALUES] [-h/--help] --config-file [filepath]
 ```
 
-Even though _EasyDEA_ contains a set of default parameters for the analysis pipeline, users can define custom default values in a text file and save it with the name ```.easyDEA.rc```. This configuration file can be located either at the program installation folder or within the user's HOME directory ```~/```, allowing the program to automatically recognize it. Importantly, command-line options will take precedence over file-defined options.
+Even though _EasyDEA_ contains a set of default parameters for the analysis pipeline, users can define custom default values in a text file and save it with the name ```.EasyDEA.rc```. This configuration file can be located either at the program installation folder or within the user's HOME directory ```~/```, allowing the program to automatically recognize it. Importantly, command-line options will take precedence over file-defined options.
 
 An example configuration file containing all available command line options and parameter values can be found [here](data/config_file.txt).
 
