@@ -19,7 +19,6 @@ _EasyDEA_ generates multiple output files throughout the analysis, including raw
 
 _Image generated with Biorender.com_
 
-
 #### 3) How to run _EasyDEA_?
 To run the program, clone or download the repository onto your local device, within the desired installation path. To initiate the analysis, execute the main script ```easyDEA.R``` followed by custom command-line options and parameter values. Alternatively, users can provide as input a configuration text file containing a list of options and parameter values for the analysis. For more information about the available program options and default parameters, run the program followed by the option ```--help```.
 
@@ -31,8 +30,13 @@ Even though _EasyDEA_ contains a set of default parameters for the analysis pipe
 
 An example configuration file containing all available command line options and parameter values can be found [here](data/config_file.txt).
 
+<br/><hr/>
 
 ### Contact details
 For more information regarding _EasyDEA_ functioning and  problem reporting, please do not hesitate to contact me.
 - [adrian.barreno@alumnos.upm.es](mailto:adrian.barreno@alumnos.upm.es)
 - [linkedIn](https://www.linkedin.com/in/adri%C3%A1n-barreno-s%C3%A1nchez-890a45206/)
+
+
+<img src="https://github.com/abarrenos/EasyDEA/assets/113832131/de17de66-9cb2-418e-9b3a-8ccb34d78616" alt="Logo CNB" height="90"/>
+<img src="https://github.com/abarrenos/EasyDEA/assets/113832131/add67521-e92e-4f57-90b5-06c6e6b6a29c" alt="Logo CNB" height="90"/>
